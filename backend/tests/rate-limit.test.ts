@@ -110,3 +110,47 @@ describe('rate limiting', () => {
     expect(res.status).not.toBe(429);
   });
 });
+
+describe('refresh rate limiting', () => {
+  const cookieValue = (res: SupertestResponse): string => {
+    const raw = res.headers['set-cookie'];
+    const all = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const match = all.find((c: string) => c.startsWith('iip_refresh='));
+    return match!.split(';')[0]!.slice('iip_refresh='.length);
+  };
+
+  const loginCookie = async (email: string): Promise<string> => {
+    const res = await request(app).post(`${AUTH}/login`).send({ email, password: GOOD_PASSWORD });
+    expect(res.status).toBe(200);
+    return cookieValue(res);
+  };
+
+  it('keys the refresh budget per user, not per IP', async () => {
+    const a = await createUser({ email: 'rl-refresh-a@example.com' });
+    const b = await createUser({ email: 'rl-refresh-b@example.com' });
+
+    let cookieA = await loginCookie(a.email);
+    const cookieB = await loginCookie(b.email);
+
+    // Spend a's entire 60/hour budget. Every request here comes from the same
+    // test client, so under IP keying this would drain b's budget too.
+    let limited = false;
+    for (let i = 0; i < 62; i++) {
+      const res = await request(app)
+        .post(`${AUTH}/refresh`)
+        .set('Cookie', [`iip_refresh=${cookieA}`]);
+      if (res.status === 429) {
+        limited = true;
+        break;
+      }
+      expect(res.status).toBe(200);
+      cookieA = cookieValue(res);
+    }
+    expect(limited).toBe(true);
+
+    const other = await request(app)
+      .post(`${AUTH}/refresh`)
+      .set('Cookie', [`iip_refresh=${cookieB}`]);
+    expect(other.status).toBe(200);
+  });
+});

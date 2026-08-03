@@ -206,3 +206,30 @@ describe('app basics', () => {
     expect(res.headers['x-powered-by']).toBeUndefined();
   });
 });
+
+describe('DELETE /auth/sessions/:id', () => {
+  it('404s a malformed session id instead of failing the query', async () => {
+    const user = await createUser({ email: 'bad-id@example.com' });
+    const session = await loginAs(user.email);
+
+    const res = await api()
+      .delete(`${AUTH}/sessions/not-a-uuid`)
+      .set('Authorization', `Bearer ${session.accessToken}`);
+
+    // A raw param reaching a uuid column makes Postgres raise 22P02, which
+    // surfaces as a 500 and echoes the failed statement back in development.
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('404s a well-formed id that belongs to nobody', async () => {
+    const user = await createUser({ email: 'no-such-session@example.com' });
+    const session = await loginAs(user.email);
+
+    const res = await api()
+      .delete(`${AUTH}/sessions/00000000-0000-4000-8000-000000000000`)
+      .set('Authorization', `Bearer ${session.accessToken}`);
+
+    expect(res.status).toBe(404);
+  });
+});

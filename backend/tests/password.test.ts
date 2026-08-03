@@ -272,3 +272,43 @@ describe('user status transitions', () => {
     expect(left).toHaveLength(0);
   });
 });
+
+describe('password reset token economy', () => {
+  it('does not burn the link when the new password is rejected', async () => {
+    const user = await createUser({ email: 'retry-reset@example.com' });
+    const token = await issueRawToken(user.id, 'password_reset');
+
+    // A password containing the local part fails the policy — the same class
+    // of ordinary rejection the breach check produces.
+    const rejected = await api()
+      .post(`${AUTH}/password/reset`)
+      .send({ token, newPassword: 'retry-reset-is-my-passphrase' });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error.code).toBe('WEAK_PASSWORD');
+
+    // The same link must still work once the user picks something acceptable.
+    const accepted = await api()
+      .post(`${AUTH}/password/reset`)
+      .send({ token, newPassword: NEW_PASSWORD });
+    expect(accepted.status).toBe(204);
+
+    const after = await getUserByEmail(user.email);
+    expect(await verifyPassword(after!.passwordHash!, NEW_PASSWORD)).toBe(true);
+  });
+
+  it('still allows the link to be spent only once', async () => {
+    const user = await createUser({ email: 'once-only@example.com' });
+    const token = await issueRawToken(user.id, 'password_reset');
+
+    const first = await api()
+      .post(`${AUTH}/password/reset`)
+      .send({ token, newPassword: NEW_PASSWORD });
+    expect(first.status).toBe(204);
+
+    const second = await api()
+      .post(`${AUTH}/password/reset`)
+      .send({ token, newPassword: 'yet-another-good-passphrase-77' });
+    expect(second.status).toBe(400);
+    expect(second.body.error.code).toBe('INVALID_TOKEN');
+  });
+});

@@ -11,7 +11,7 @@ import { db } from '../src/db/index.js';
 import { oauthAccounts, users } from '../src/db/schema/auth.js';
 import { AppError } from '../src/lib/errors.js';
 import { resolveOAuthUser, type ProviderProfile } from '../src/services/oauth-service.js';
-import { AUTH, api, createUser, getUserByEmail } from './helpers.js';
+import { AUTH, api, createUnverifiedUser, createUser, getUserByEmail } from './helpers.js';
 
 function profile(over: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -176,5 +176,61 @@ describe('OAuth routes', () => {
     const res = await api().get(`${AUTH}/oauth/google/callback?code=abc&state=never-issued`);
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=');
+  });
+});
+
+describe('resolveOAuthUser account status', () => {
+  it('refuses a suspended user signing in through an already-linked provider', async () => {
+    const user = await createUser({ email: 'susp-linked@example.com', status: 'suspended' });
+    await db.insert(oauthAccounts).values({
+      userId: user.id,
+      provider: 'google',
+      providerAccountId: 'susp-1',
+    });
+
+    await expect(
+      resolveOAuthUser('google', profile({ providerAccountId: 'susp-1', email: user.email })),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'ACCOUNT_SUSPENDED' });
+  });
+
+  it('refuses a deleted user without confirming the account exists', async () => {
+    const user = await createUser({ email: 'gone@example.com', status: 'deleted' });
+    await db.insert(oauthAccounts).values({
+      userId: user.id,
+      provider: 'github',
+      providerAccountId: 'gone-1',
+    });
+
+    await expect(
+      resolveOAuthUser('github', profile({ providerAccountId: 'gone-1', email: user.email })),
+    ).rejects.toMatchObject({ statusCode: 401, code: 'INVALID_CREDENTIALS' });
+  });
+
+  it('does not link or mutate a suspended account reached by email', async () => {
+    const user = await createUnverifiedUser({ email: 'susp-link@example.com', status: 'suspended' });
+
+    await expect(
+      resolveOAuthUser('google', profile({ providerAccountId: 'susp-2', email: user.email })),
+    ).rejects.toBeInstanceOf(AppError);
+
+    // The link is refused before any write — no oauth row, and the account is
+    // not silently marked verified by the attempt.
+    const links = await db
+      .select()
+      .from(oauthAccounts)
+      .where(eq(oauthAccounts.userId, user.id));
+    expect(links).toHaveLength(0);
+
+    const after = await getUserByEmail(user.email);
+    expect(after?.emailVerifiedAt).toBeNull();
+  });
+
+  it('still admits an active user on the same paths', async () => {
+    const user = await createUser({ email: 'active-oauth@example.com' });
+    const { user: resolved } = await resolveOAuthUser(
+      'google',
+      profile({ providerAccountId: 'active-1', email: user.email }),
+    );
+    expect(resolved.id).toBe(user.id);
   });
 });

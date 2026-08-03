@@ -86,6 +86,20 @@ export async function revokeByRawToken(raw: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Owner of a refresh token, without consuming or validating it. Used by the
+ * rate limiter, which has to key on the user before the handler runs. Revoked
+ * and expired rows still resolve — someone replaying a dead token should be
+ * rate-limited too.
+ */
+export async function findUserIdByRefreshToken(raw: string): Promise<string | null> {
+  const row = await db.query.refreshTokens.findFirst({
+    where: eq(refreshTokens.tokenHash, sha256(raw)),
+    columns: { userId: true },
+  });
+  return row?.userId ?? null;
+}
+
 export interface RotationResult {
   userId: string;
   next: IssuedRefreshToken;

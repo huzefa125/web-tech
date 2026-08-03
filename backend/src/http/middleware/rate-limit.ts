@@ -13,11 +13,14 @@ import { env } from '../../config/env.js';
 import { tooManyRequests } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { redis } from '../../lib/redis.js';
+import { findUserIdByRefreshToken } from '../../services/token-service.js';
+import { readRefreshCookie } from '../cookies.js';
 
 interface LimitSpec {
   points: number;
   durationSeconds: number;
-  by: 'ip' | 'email' | 'user';
+  /** `refresh_user` resolves the owner from the refresh cookie. */
+  by: 'ip' | 'email' | 'user' | 'refresh_user';
 }
 
 function makeLimiter(keyPrefix: string, spec: LimitSpec): RateLimiterRedis {
@@ -37,7 +40,7 @@ function clientIp(req: Request): string {
   return req.ip ?? req.socket.remoteAddress ?? 'unknown';
 }
 
-function resolveKey(req: Request, by: LimitSpec['by']): string | null {
+async function resolveKey(req: Request, by: LimitSpec['by']): Promise<string | null> {
   switch (by) {
     case 'ip':
       return clientIp(req);
@@ -47,6 +50,10 @@ function resolveKey(req: Request, by: LimitSpec['by']): string | null {
     }
     case 'user':
       return req.user?.id ?? null;
+    case 'refresh_user': {
+      const raw = readRefreshCookie(req.cookies);
+      return raw ? findUserIdByRefreshToken(raw) : null;
+    }
   }
 }
 
@@ -65,7 +72,7 @@ export function rateLimit(name: string, ...specs: LimitSpec[]) {
     if (!env.RATE_LIMIT_ENABLED) return next();
 
     for (const { spec, limiter } of limiters) {
-      const key = resolveKey(req, spec.by);
+      const key = await resolveKey(req, spec.by);
       if (key === null) continue; // nothing to key on (e.g. no email in body)
 
       try {
@@ -113,11 +120,18 @@ export const resendVerificationLimiter = rateLimit('resend', {
   by: 'email',
 });
 
-export const refreshLimiter = rateLimit('refresh', {
-  points: 60,
-  durationSeconds: 3600,
-  by: 'ip',
-});
+/**
+ * Spec §6 says per user, and it matters: keyed by IP, every user behind one
+ * corporate NAT or mobile carrier shares a single 60/hour bucket, which with a
+ * 15-minute access token is a handful of colleagues before legitimate sessions
+ * start failing. The IP limit stays as a loose backstop, since a request
+ * carrying no usable cookie has no user to key on.
+ */
+export const refreshLimiter = rateLimit(
+  'refresh',
+  { points: 60, durationSeconds: 3600, by: 'refresh_user' },
+  { points: 600, durationSeconds: 3600, by: 'ip' },
+);
 
 /** Broad backstop for the rest of the auth surface. */
 export const generalAuthLimiter = rateLimit('auth', {

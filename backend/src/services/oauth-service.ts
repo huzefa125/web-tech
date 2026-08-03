@@ -12,7 +12,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { env, githubOAuthConfigured, googleOAuthConfigured } from '../config/env.js';
 import { db } from '../db/index.js';
 import { oauthAccounts, users, type OAuthProvider, type User } from '../db/schema/auth.js';
-import { AppError, badRequest, notImplemented } from '../lib/errors.js';
+import { AppError, badRequest, forbidden, notImplemented, unauthorized } from '../lib/errors.js';
 import { logAuthEvent, logger } from '../lib/logger.js';
 import { redis } from '../lib/redis.js';
 
@@ -226,6 +226,21 @@ export async function handleOAuthCallback(params: {
 }
 
 /**
+ * Suspended and deleted accounts are rejected on the password path
+ * (auth-service `login`). Without the same gate here, signing in with Google or
+ * GitHub is a way straight around a suspension.
+ */
+function assertActive(user: User): void {
+  if (user.status === 'active') return;
+
+  logAuthEvent('oauth_login_refused', { userId: user.id, status: user.status });
+  if (user.status === 'suspended') {
+    throw forbidden('ACCOUNT_SUSPENDED', 'This account has been suspended.');
+  }
+  throw unauthorized('INVALID_CREDENTIALS', 'This account is no longer available.');
+}
+
+/**
  * Map a provider profile onto a local user, in the priority order defined by
  * spec §5.3.
  */
@@ -244,6 +259,7 @@ export async function resolveOAuthUser(
   if (link) {
     const existing = await db.query.users.findFirst({ where: eq(users.id, link.userId) });
     if (existing) {
+      assertActive(existing);
       logAuthEvent('oauth_login', { userId: existing.id, provider });
       return { user: existing, created: false };
     }
@@ -257,6 +273,10 @@ export async function resolveOAuthUser(
   const byEmail = await db.query.users.findFirst({ where: eq(users.email, profile.email) });
 
   if (byEmail) {
+    // Before linking or backfilling anything — a suspended account must not be
+    // mutated by a sign-in attempt it is not allowed to complete.
+    assertActive(byEmail);
+
     if (!profile.emailVerified) {
       // Refusing to auto-link here is deliberate: anyone who can set an
       // unverified email at the provider could otherwise claim this account.

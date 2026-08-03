@@ -19,6 +19,7 @@ import {
   oauthProviderSchema,
   resendVerificationSchema,
   resetPasswordSchema,
+  sessionIdSchema,
   signupSchema,
   updateProfileSchema,
   verifyEmailSchema,
@@ -199,9 +200,9 @@ authRouter.get('/sessions', requireAuth, async (req, res) => {
 });
 
 authRouter.delete('/sessions/:id', requireAuth, async (req, res) => {
-  const sessionId = param(req.params.id);
-  if (!sessionId) throw notFound('Session not found');
-  const ok = await tokenService.revokeSession(req.user!.id, sessionId);
+  const sessionId = sessionIdSchema.safeParse(param(req.params.id));
+  if (!sessionId.success) throw notFound('Session not found');
+  const ok = await tokenService.revokeSession(req.user!.id, sessionId.data);
   if (!ok) throw notFound('Session not found');
   res.status(204).send();
 });

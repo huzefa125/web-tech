@@ -1,5 +1,8 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
+import { db } from '../src/db/index.js';
+import { users } from '../src/db/schema/auth.js';
 import {
   AUTH,
   GOOD_PASSWORD,
@@ -94,5 +97,25 @@ describe('POST /auth/signup', () => {
       .send({ email: 'leak@example.com', password: GOOD_PASSWORD });
 
     expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|password_hash|\$argon2/);
+  });
+});
+
+describe('POST /auth/signup concurrency', () => {
+  it('answers identically when two signups race for one address', async () => {
+    const email = 'race@example.com';
+
+    const [a, b] = await Promise.all([
+      api().post(`${AUTH}/signup`).send({ email, password: GOOD_PASSWORD }),
+      api().post(`${AUTH}/signup`).send({ email, password: GOOD_PASSWORD }),
+    ]);
+
+    // The pre-insert lookup is not a lock, so one of these loses to the unique
+    // index. It must still read as an ordinary 201 — a 500 here would be both
+    // a bug and an enumeration signal.
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+
+    const rows = await db.select().from(users).where(eq(users.email, email));
+    expect(rows).toHaveLength(1);
   });
 });

@@ -69,6 +69,25 @@ async function createOneTimeToken(userId: string, purpose: TokenPurpose): Promis
   return raw;
 }
 
+/**
+ * Look up a live token without spending it, so a caller can validate the rest
+ * of the request before committing to the redemption.
+ */
+async function peekOneTimeToken(raw: string, purpose: TokenPurpose): Promise<string> {
+  const row = await db.query.verificationTokens.findFirst({
+    where: and(
+      eq(verificationTokens.tokenHash, sha256(raw)),
+      eq(verificationTokens.purpose, purpose),
+      isNull(verificationTokens.usedAt),
+      sql`${verificationTokens.expiresAt} > now()`,
+    ),
+    columns: { userId: true },
+  });
+
+  if (!row) throw badRequest('INVALID_TOKEN', 'This link is invalid, expired, or already used');
+  return row.userId;
+}
+
 /** Atomically consume a one-time token. Returns the user id, or throws. */
 async function consumeOneTimeToken(raw: string, purpose: TokenPurpose): Promise<string> {
   // Conditional UPDATE so a token cannot be redeemed twice under concurrency.
@@ -109,21 +128,30 @@ export async function signup(input: {
   const policy = await validatePassword(input.password, { email: input.email });
   if (!policy.ok) throw badRequest('WEAK_PASSWORD', policy.reason!);
 
-  const existing = await findUserByEmail(input.email);
-  if (existing) {
-    // Tell the real owner what happened, but give the caller nothing.
+  // Tell the real owner what happened, but give the caller nothing.
+  const asDuplicate = async (): Promise<SignupResult> => {
     await sendDuplicateSignupEmail(input.email);
     logAuthEvent('signup_duplicate', { email: input.email });
     return { user: null };
-  }
+  };
+
+  const existing = await findUserByEmail(input.email);
+  if (existing) return asDuplicate();
 
   const passwordHash = await hashPassword(input.password);
   const inserted = await db
     .insert(users)
     .values({ email: input.email, passwordHash, fullName: input.fullName ?? null })
+    // The check above is not a lock: two concurrent signups for one address
+    // both pass it. Letting the unique index decide turns the loser into the
+    // same duplicate response instead of a 500 — the response must be
+    // identical either way or it becomes an enumeration oracle (spec §4).
+    .onConflictDoNothing({ target: users.email })
     .returning();
 
-  const user = inserted[0]!;
+  const user = inserted[0];
+  if (!user) return asDuplicate();
+
   const raw = await createOneTimeToken(user.id, 'email_verify');
   await sendVerificationEmail(user.email, raw);
 
@@ -248,13 +276,20 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 export async function resetPassword(rawToken: string, newPassword: string): Promise<void> {
-  const userId = await consumeOneTimeToken(rawToken, 'password_reset');
+  // Check the password before spending the token. Consuming first would mean a
+  // password rejected by the breach check — an ordinary outcome — costs the
+  // user their whole reset link and a second email.
+  const peeked = await peekOneTimeToken(rawToken, 'password_reset');
 
-  const user = await findUserById(userId);
+  const user = await findUserById(peeked);
   if (!user) throw badRequest('INVALID_TOKEN', 'This link is invalid or expired');
 
   const policy = await validatePassword(newPassword, { email: user.email });
   if (!policy.ok) throw badRequest('WEAK_PASSWORD', policy.reason!);
+
+  // Only now claim it. Still the atomic conditional UPDATE, so a token that was
+  // redeemed concurrently between the peek and here loses the race and throws.
+  const userId = await consumeOneTimeToken(rawToken, 'password_reset');
 
   await db
     .update(users)

@@ -66,6 +66,12 @@ export const updateProfileSchema = z
 
 export const oauthProviderSchema = z.enum(['google', 'github']);
 
+/**
+ * Route params land in `uuid` columns. Postgres rejects a malformed one with
+ * 22P02, which surfaces as a 500 — validate at the edge so it stays a 404.
+ */
+export const sessionIdSchema = z.uuid();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
