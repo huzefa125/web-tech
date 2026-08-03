@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --yes shadcn@latest init -b radix -p nova --yes --force)",
+      "Bash(npx --yes shadcn@latest add button input label card badge sonner skeleton separator dropdown-menu avatar tabs progress alert form --yes)",
+      "Bash(npm install *)",
+      "Bash(npx --yes shadcn@latest add https://ui.aceternity.com/registry/spotlight-new.json --yes)",
+      "Bash(rm src/components/ui/card-spotlight.tsx src/components/ui/canvas-reveal-effect.tsx)",
+      "Bash(npm uninstall *)",
+      "Bash(npx --yes shadcn@latest add form --yes)",
+      "Bash(pkill -f \"next start\")",
+      "Bash(npm run *)"
+    ]
+  }
+}
