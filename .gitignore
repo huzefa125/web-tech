@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Secrets — .env.example is committed, .env is not
+.env
+.env.local
+.env.*.local
+!.env.example
+
+coverage/
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+.vercel
+.turbo
+
+# embedded postgres test data
+backend/.pg-test-data/

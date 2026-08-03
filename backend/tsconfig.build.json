@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Only set for the build so `dist/` mirrors `src/` exactly. The base
+    // config omits it so typechecking can also cover tests/, which live
+    // outside src/.
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests", "**/*.test.ts", "vitest.config.ts", "drizzle.config.ts"]
+}
