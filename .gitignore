@@ -24,3 +24,7 @@ Thumbs.db
 
 # embedded postgres test data
 backend/.pg-test-data/
+
+# captured scan artefacts (local storage driver)
+backend/.storage/
+backend/.storage-test/

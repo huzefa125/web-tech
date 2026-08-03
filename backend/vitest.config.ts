@@ -32,6 +32,10 @@ export default defineConfig({
       FRONTEND_URL: 'http://localhost:3000',
       BACKEND_URL: 'http://localhost:8000',
       LOG_LEVEL: 'silent',
+      // The crawler suite drives a fixture server on loopback, so the
+      // production 30s navigation budget only makes the timeout case slow.
+      CRAWLER_NAV_TIMEOUT_MS: '3000',
+      STORAGE_LOCAL_ROOT: './.storage-test',
     },
     coverage: {
       provider: 'v8',

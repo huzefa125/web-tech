@@ -10,6 +10,7 @@ import { pinoHttp } from 'pino-http';
 import { env, isProduction, isTest } from './config/env.js';
 import { errorHandler, notFoundHandler } from './http/middleware/error-handler.js';
 import { authRouter } from './http/routes/auth.js';
+import { scansRouter } from './http/routes/scans.js';
 import { logger } from './lib/logger.js';
 
 export function createApp(): Express {
@@ -62,6 +63,7 @@ export function createApp(): Express {
   });
 
   app.use(`${env.API_V1_PREFIX}/auth`, authRouter);
+  app.use(`${env.API_V1_PREFIX}/scans`, scansRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

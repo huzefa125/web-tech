@@ -58,6 +58,34 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('Internet Intelligence <noreply@example.com>'),
 
+  // ---- Storage ------------------------------------------------------
+  // Captured HTML/CSS/JS and screenshots. Local disk in dev; R2 in production
+  // once the bucket exists — see src/lib/storage.ts.
+  STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
+  STORAGE_LOCAL_ROOT: z.string().default('./.storage'),
+
+  // ---- Crawler (module 1) -------------------------------------------
+  CRAWLER_NAV_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  CRAWLER_ASSET_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  /** Per-scan cap on stored CSS/JS files. Some sites ship hundreds. */
+  CRAWLER_MAX_ASSETS: z.coerce.number().int().positive().default(50),
+  /** Per-asset byte cap; anything larger is recorded but not stored. */
+  CRAWLER_MAX_ASSET_BYTES: z.coerce.number().int().positive().default(5_000_000),
+  CRAWLER_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(1440),
+  CRAWLER_VIEWPORT_HEIGHT: z.coerce.number().int().positive().default(900),
+  CRAWLER_USER_AGENT: z
+    .string()
+    .default(
+      'Mozilla/5.0 (compatible; IIPBot/0.1; +https://example.com/bot) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+    ),
+
+  // ---- Queue --------------------------------------------------------
+  SCAN_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  SCAN_JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
+
+  // ---- Quotas (§6) --------------------------------------------------
+  FREE_SCANS_PER_DAY: z.coerce.number().int().positive().default(5),
+
   // ---- Security policy ----------------------------------------------
   PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).default(12),
   HIBP_ENABLED: z

@@ -1,0 +1,333 @@
+/**
+ * Scan lifecycle: request → queue → run → persist.
+ *
+ * The HTTP layer only ever calls `requestScan`, which returns as soon as the
+ * row exists. Crawling happens on the worker, because a Playwright run takes
+ * seconds to tens of seconds and holding a request open for it would tie up a
+ * connection and time out behind most proxies.
+ */
+
+import { and, count, desc, eq, gte, sql } from 'drizzle-orm';
+import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
+
+import { env } from '../config/env.js';
+import { db } from '../db/index.js';
+import type { Plan } from '../db/schema/auth.js';
+import {
+  scanAssets,
+  scans,
+  screenshots,
+  websites,
+  type Scan,
+  type ScanStatus,
+  type Website,
+} from '../db/schema/scans.js';
+import { AppError, notFound } from '../lib/errors.js';
+import { logger } from '../lib/logger.js';
+import { resolveTarget } from '../lib/scan-target.js';
+import { getStorage, scanKey } from '../lib/storage.js';
+import { crawl, type CapturedAsset } from './crawler.js';
+
+// ------------------------------------------------------------------ quota
+
+/** Free tier is 5 scans/day (§6). Paid plans are uncapped for now. */
+export function dailyScanLimit(plan: Plan): number | null {
+  return plan === 'free' ? env.FREE_SCANS_PER_DAY : null;
+}
+
+export async function scansToday(userId: string): Promise<number> {
+  const since = new Date(Date.now() - 86_400_000);
+  const rows = await db
+    .select({ n: count() })
+    .from(scans)
+    .where(and(eq(scans.requestedBy, userId), gte(scans.queuedAt, since)));
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * Throws 429 when the caller is out of scans. Counts every scan requested in
+ * the last 24h, including failed ones — a failed crawl still cost us a browser
+ * and a page load, and not counting them makes the limit trivially evadable by
+ * scanning addresses that 500.
+ */
+export async function assertScanQuota(userId: string, plan: Plan): Promise<void> {
+  const limit = dailyScanLimit(plan);
+  if (limit === null) return;
+
+  const used = await scansToday(userId);
+  if (used >= limit) {
+    throw new AppError(
+      429,
+      'RATE_LIMITED',
+      `You have used all ${limit} scans on the free plan today. Upgrade for unlimited scans.`,
+      { limit, used },
+    );
+  }
+}
+
+// ---------------------------------------------------------------- request
+
+/** Find the website row for a host, creating it on first sight. */
+export async function upsertWebsite(host: string, canonicalUrl: string): Promise<Website> {
+  const inserted = await db
+    .insert(websites)
+    .values({ host, canonicalUrl })
+    .onConflictDoNothing({ target: websites.host })
+    .returning();
+
+  if (inserted[0]) return inserted[0];
+
+  // Lost the insert race, or the site was already known.
+  const existing = await db.query.websites.findFirst({ where: eq(websites.host, host) });
+  if (!existing) throw new Error(`website row for ${host} vanished mid-upsert`);
+  return existing;
+}
+
+export interface RequestScanResult {
+  scan: Scan;
+  website: Website;
+}
+
+/**
+ * Validate the address, record the scan as queued, and hand it to the worker.
+ * Resolution happens here rather than on the worker so a typo comes back to
+ * the user as an immediate 400 instead of a job that fails 20 seconds later.
+ */
+export async function requestScan(input: {
+  url: string;
+  userId: string;
+  plan: Plan;
+}): Promise<RequestScanResult> {
+  await assertScanQuota(input.userId, input.plan);
+
+  const target = await resolveTarget(input.url);
+  const website = await upsertWebsite(target.host, target.url);
+
+  const inserted = await db
+    .insert(scans)
+    .values({ websiteId: website.id, requestedBy: input.userId, status: 'queued' })
+    .returning();
+
+  const scan = inserted[0]!;
+
+  // Imported lazily: the queue opens a Redis connection on import, and the
+  // route layer must stay importable in tests that never enqueue anything.
+  const { enqueueScan } = await import('../queue/scan-queue.js');
+  const jobId = await enqueueScan({ scanId: scan.id, url: target.url });
+
+  const withJob = await db
+    .update(scans)
+    .set({ jobId })
+    .where(eq(scans.id, scan.id))
+    .returning();
+
+  logger.info({ scanId: scan.id, host: target.host, jobId }, 'scan queued');
+  return { scan: withJob[0]!, website };
+}
+
+// -------------------------------------------------------------------- run
+
+async function markStatus(
+  scanId: string,
+  status: ScanStatus,
+  // The update-set type rather than the insert type: callers pass `sql`now()``
+  // for timestamps, which the insert type declares as Date.
+  patch: PgUpdateSetSource<typeof scans> = {},
+): Promise<void> {
+  await db.update(scans).set({ status, ...patch }).where(eq(scans.id, scanId));
+}
+
+/** Persist one captured asset. Truncated assets are recorded, not stored. */
+async function storeAsset(scanId: string, index: number, asset: CapturedAsset): Promise<void> {
+  const storage = getStorage();
+  const key = scanKey(scanId, asset.kind, `${index}.${asset.kind}`);
+
+  const put = asset.truncated
+    ? { storageKey: '', byteSize: 0, sha256: '' }
+    : await storage.put(key, asset.body, asset.contentType ?? undefined);
+
+  await db.insert(scanAssets).values({
+    scanId,
+    kind: asset.kind,
+    url: asset.url,
+    storageKey: put.storageKey,
+    byteSize: put.byteSize,
+    sha256: put.sha256,
+    contentType: asset.contentType,
+  });
+}
+
+/**
+ * Execute a queued scan. Called by the worker; never by a request handler.
+ *
+ * Failures are recorded on the row and rethrown, so BullMQ can retry while the
+ * API still has something truthful to show in the meantime.
+ */
+export async function runScan(scanId: string, url: string): Promise<void> {
+  const existing = await db.query.scans.findFirst({ where: eq(scans.id, scanId) });
+  if (!existing) throw notFound('Scan not found');
+  if (existing.status === 'cancelled') {
+    logger.info({ scanId }, 'skipping cancelled scan');
+    return;
+  }
+
+  await markStatus(scanId, 'running', { startedAt: sql`now()` });
+
+  try {
+    const result = await crawl(url);
+    const storage = getStorage();
+
+    const htmlPut = await storage.put(scanKey(scanId, 'index.html'), result.html, 'text/html');
+    await db.insert(scanAssets).values({
+      scanId,
+      kind: 'html',
+      url: result.finalUrl,
+      storageKey: htmlPut.storageKey,
+      byteSize: htmlPut.byteSize,
+      sha256: htmlPut.sha256,
+      contentType: 'text/html',
+    });
+
+    // Sequential on purpose: a page can return dozens of assets and firing
+    // every write at the pool at once starves the rest of the process.
+    for (const [i, asset] of result.assets.entries()) {
+      await storeAsset(scanId, i, asset);
+    }
+
+    const shotPut = await storage.put(
+      scanKey(scanId, 'screenshot.png'),
+      result.screenshot.body,
+      'image/png',
+    );
+    await db.insert(screenshots).values({
+      scanId,
+      storageKey: shotPut.storageKey,
+      width: result.screenshot.width,
+      height: result.screenshot.height,
+      byteSize: shotPut.byteSize,
+      kind: 'viewport',
+    });
+
+    await markStatus(scanId, 'succeeded', {
+      finalUrl: result.finalUrl,
+      httpStatus: result.httpStatus,
+      responseHeaders: result.responseHeaders,
+      loadTimeMs: result.loadTimeMs,
+      finishedAt: sql`now()`,
+      errorCode: null,
+      errorMessage: null,
+    });
+
+    await db
+      .update(websites)
+      .set({ lastScannedAt: sql`now()` })
+      .where(eq(websites.id, existing.websiteId));
+
+    logger.info(
+      { scanId, assets: result.assets.length, loadTimeMs: result.loadTimeMs },
+      'scan succeeded',
+    );
+  } catch (err) {
+    const isUserError = err instanceof AppError;
+    await markStatus(scanId, 'failed', {
+      finishedAt: sql`now()`,
+      errorCode: isUserError ? err.code : 'INTERNAL_ERROR',
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    logger.warn({ err, scanId }, 'scan failed');
+    throw err;
+  }
+}
+
+// ------------------------------------------------------------------ reads
+
+export interface ScanDetail {
+  scan: Scan;
+  website: Website;
+  assets: { id: string; kind: string; url: string; byteSize: number; contentType: string | null }[];
+  screenshot: { id: string; width: number; height: number; byteSize: number } | null;
+}
+
+export async function getScanDetail(scanId: string): Promise<ScanDetail | null> {
+  const scan = await db.query.scans.findFirst({ where: eq(scans.id, scanId) });
+  if (!scan) return null;
+
+  const website = await db.query.websites.findFirst({ where: eq(websites.id, scan.websiteId) });
+  if (!website) return null;
+
+  const assets = await db
+    .select({
+      id: scanAssets.id,
+      kind: scanAssets.kind,
+      url: scanAssets.url,
+      byteSize: scanAssets.byteSize,
+      contentType: scanAssets.contentType,
+    })
+    .from(scanAssets)
+    .where(eq(scanAssets.scanId, scanId));
+
+  const shots = await db
+    .select({
+      id: screenshots.id,
+      width: screenshots.width,
+      height: screenshots.height,
+      byteSize: screenshots.byteSize,
+    })
+    .from(screenshots)
+    .where(eq(screenshots.scanId, scanId))
+    .limit(1);
+
+  return { scan, website, assets, screenshot: shots[0] ?? null };
+}
+
+/** Storage location of a screenshot. Kept out of ScanDetail — the key is an
+ *  internal detail the API must not hand to clients. */
+export async function getScreenshotRef(
+  screenshotId: string,
+): Promise<{ storageKey: string } | null> {
+  const rows = await db
+    .select({ storageKey: screenshots.storageKey })
+    .from(screenshots)
+    .where(eq(screenshots.id, screenshotId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** A user's own scans, newest first. */
+export async function listScansForUser(userId: string, limit = 20, offset = 0) {
+  return db
+    .select({
+      id: scans.id,
+      status: scans.status,
+      host: websites.host,
+      finalUrl: scans.finalUrl,
+      httpStatus: scans.httpStatus,
+      loadTimeMs: scans.loadTimeMs,
+      errorCode: scans.errorCode,
+      queuedAt: scans.queuedAt,
+      finishedAt: scans.finishedAt,
+    })
+    .from(scans)
+    .innerJoin(websites, eq(websites.id, scans.websiteId))
+    .where(eq(scans.requestedBy, userId))
+    .orderBy(desc(scans.queuedAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+/** The history timeline for one website (§23 reads this). */
+export async function listScansForWebsite(websiteId: string, limit = 50) {
+  return db
+    .select({
+      id: scans.id,
+      status: scans.status,
+      httpStatus: scans.httpStatus,
+      loadTimeMs: scans.loadTimeMs,
+      queuedAt: scans.queuedAt,
+      finishedAt: scans.finishedAt,
+    })
+    .from(scans)
+    .where(eq(scans.websiteId, websiteId))
+    .orderBy(desc(scans.queuedAt))
+    .limit(limit);
+}
