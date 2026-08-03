@@ -17,9 +17,11 @@ import {
   scanAssets,
   scans,
   screenshots,
+  technologies,
   websites,
   type Scan,
   type ScanStatus,
+  type Technology,
   type Website,
 } from '../db/schema/scans.js';
 import { AppError, notFound } from '../lib/errors.js';
@@ -27,6 +29,7 @@ import { logger } from '../lib/logger.js';
 import { resolveTarget } from '../lib/scan-target.js';
 import { getStorage, scanKey } from '../lib/storage.js';
 import { crawl, type CapturedAsset } from './crawler.js';
+import { detect } from './detectors/index.js';
 
 // ------------------------------------------------------------------ quota
 
@@ -137,6 +140,55 @@ async function markStatus(
   await db.update(scans).set({ status, ...patch }).where(eq(scans.id, scanId));
 }
 
+/** Longest error message we will store. Driver errors quote the whole failed
+ *  statement, parameters included, which for a scan means the entire header
+ *  blob — megabytes, none of it useful to a user. */
+const MAX_ERROR_MESSAGE = 2_000;
+
+export function errorMessageFor(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.length > MAX_ERROR_MESSAGE ? `${raw.slice(0, MAX_ERROR_MESSAGE)}…` : raw;
+}
+
+/**
+ * Record a failure. Deliberately defensive, because the obvious version has a
+ * trap in it: the error message often *contains* whatever broke the previous
+ * write, so writing it back can fail for the identical reason and leave the
+ * scan stuck in `running` forever, with no error and no way to retry.
+ *
+ * Seen for real — wordpress.org serves an `x-olaf: ⛄` header, the database
+ * rejected the character, and the rejection message quoted the character back.
+ *
+ * So: truncate, and if the write still fails, fall back to a message built
+ * from nothing but our own constants.
+ */
+async function markFailed(scanId: string, err: unknown): Promise<void> {
+  const errorCode = err instanceof AppError ? err.code : 'INTERNAL_ERROR';
+
+  try {
+    await markStatus(scanId, 'failed', {
+      finishedAt: sql`now()`,
+      errorCode,
+      errorMessage: errorMessageFor(err),
+    });
+    return;
+  } catch (writeErr) {
+    logger.error({ writeErr, scanId }, 'could not store the scan error; falling back');
+  }
+
+  try {
+    await markStatus(scanId, 'failed', {
+      finishedAt: sql`now()`,
+      errorCode,
+      errorMessage: 'The scan failed, and the reason could not be stored.',
+    });
+  } catch (fallbackErr) {
+    // Nothing left to try — the row keeps whatever status it had. Logged at
+    // error because a scan wedged in `running` is an operational problem.
+    logger.error({ fallbackErr, scanId }, 'could not mark the scan failed at all');
+  }
+}
+
 /** Persist one captured asset. Truncated assets are recorded, not stored. */
 async function storeAsset(scanId: string, index: number, asset: CapturedAsset): Promise<void> {
   const storage = getStorage();
@@ -194,6 +246,40 @@ export async function runScan(scanId: string, url: string): Promise<void> {
       await storeAsset(scanId, i, asset);
     }
 
+    // Detection runs on what was just captured, in memory. The same inputs are
+    // all persisted, so a future rule can be replayed against an old scan
+    // without re-crawling the site.
+    const detections = detect({
+      html: result.html.toString('utf8'),
+      // Header names arrive lowercased from Playwright, which the rules assume.
+      headers: result.responseHeaders,
+      assetUrls: result.assets.map((a) => a.url),
+      globals: result.globals,
+      cookies: result.cookies,
+      css: result.assets
+        .filter((a) => a.kind === 'css')
+        .map((a) => a.body.toString('utf8'))
+        .join('\n'),
+      js: result.assets
+        .filter((a) => a.kind === 'js')
+        .map((a) => a.body.toString('utf8'))
+        .join('\n'),
+      finalUrl: result.finalUrl,
+    });
+
+    if (detections.length > 0) {
+      await db.insert(technologies).values(
+        detections.map((d) => ({
+          scanId,
+          name: d.name,
+          category: d.category,
+          version: d.version ?? null,
+          confidence: d.confidence,
+          evidence: d.evidence,
+        })),
+      );
+    }
+
     const shotPut = await storage.put(
       scanKey(scanId, 'screenshot.png'),
       result.screenshot.body,
@@ -228,12 +314,7 @@ export async function runScan(scanId: string, url: string): Promise<void> {
       'scan succeeded',
     );
   } catch (err) {
-    const isUserError = err instanceof AppError;
-    await markStatus(scanId, 'failed', {
-      finishedAt: sql`now()`,
-      errorCode: isUserError ? err.code : 'INTERNAL_ERROR',
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
+    await markFailed(scanId, err);
     logger.warn({ err, scanId }, 'scan failed');
     throw err;
   }
@@ -246,6 +327,7 @@ export interface ScanDetail {
   website: Website;
   assets: { id: string; kind: string; url: string; byteSize: number; contentType: string | null }[];
   screenshot: { id: string; width: number; height: number; byteSize: number } | null;
+  technologies: Technology[];
 }
 
 export async function getScanDetail(scanId: string): Promise<ScanDetail | null> {
@@ -277,7 +359,13 @@ export async function getScanDetail(scanId: string): Promise<ScanDetail | null> 
     .where(eq(screenshots.scanId, scanId))
     .limit(1);
 
-  return { scan, website, assets, screenshot: shots[0] ?? null };
+  const techs = await db
+    .select()
+    .from(technologies)
+    .where(eq(technologies.scanId, scanId))
+    .orderBy(desc(technologies.confidence), technologies.name);
+
+  return { scan, website, assets, screenshot: shots[0] ?? null, technologies: techs };
 }
 
 /** Storage location of a screenshot. Kept out of ScanDetail — the key is an

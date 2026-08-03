@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 
 import { ScanScreenshot } from '@/components/scan-screenshot';
 import { ScanStatusBadge, isPending } from '@/components/scan-status-badge';
+import { TechnologyList } from '@/components/technology-list';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,7 +58,7 @@ export default function ScanDetailPage() {
     );
   }
 
-  const { scan, assets, screenshot } = query.data;
+  const { scan, assets, screenshot, technologies } = query.data;
   const css = assets.filter((a) => a.kind === 'css');
   const js = assets.filter((a) => a.kind === 'js');
   const html = assets.find((a) => a.kind === 'html');
@@ -104,15 +105,24 @@ export default function ScanDetailPage() {
         </Alert>
       ) : null}
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="HTTP status" value={scan.httpStatus?.toString() ?? '—'} />
         <Stat label="Load time" value={scan.loadTimeMs ? `${scan.loadTimeMs} ms` : '—'} />
+        <Stat label="Technologies" value={technologies.length.toString()} />
         <Stat label="Assets captured" value={assets.length.toString()} />
       </div>
 
       <Tabs defaultValue="overview" className="mt-8">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="technology">
+            Technology
+            {technologies.length > 0 ? (
+              <span className="text-muted-foreground ml-1.5 tabular-nums">
+                {technologies.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
           <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="headers">Headers</TabsTrigger>
         </TabsList>
@@ -125,6 +135,10 @@ export default function ScanDetailPage() {
               No screenshot yet. It is captured when the crawl finishes.
             </p>
           )}
+        </TabsContent>
+
+        <TabsContent value="technology" className="mt-4">
+          <TechnologyList technologies={technologies} />
         </TabsContent>
 
         <TabsContent value="assets" className="mt-4 space-y-4">

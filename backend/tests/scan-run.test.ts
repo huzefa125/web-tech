@@ -37,7 +37,7 @@ vi.mock('../src/services/crawler.js', async () => {
 });
 
 const { closeBrowser } = await import('../src/services/crawler.js');
-const { runScan } = await import('../src/services/scan-service.js');
+const { errorMessageFor, runScan } = await import('../src/services/scan-service.js');
 
 const PAGE = `<!doctype html>
 <html>
@@ -52,7 +52,22 @@ beforeAll(async () => {
     if (req.url === '/s.css') res.writeHead(200, { 'content-type': 'text/css' }).end('h1{color:red}');
     else if (req.url === '/s.js')
       res.writeHead(200, { 'content-type': 'application/javascript' }).end('var a=1;');
-    else res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
+    else if (req.url === '/emoji') {
+      // wordpress.org really does serve `x-olaf: ⛄`, and real pages carry text
+      // in every script there is. Both land in Postgres verbatim.
+      //
+      // node:http rejects non-Latin-1 header values outright, so the raw UTF-8
+      // bytes have to be handed over as Latin-1 characters — which is exactly
+      // what goes on the wire when a real server emits a UTF-8 header.
+      const wire = (s: string) => Buffer.from(s, 'utf8').toString('latin1');
+      res
+        .writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'x-olaf': wire('⛄'),
+          'x-greeting': wire('नमस्ते'),
+        })
+        .end('<html><body><h1>日本語 · emoji 🎉</h1></body></html>');
+    } else res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -160,6 +175,36 @@ describe('runScan', () => {
     expect(after?.status).toBe('cancelled');
     const assets = await db.select().from(scanAssets).where(eq(scanAssets.scanId, scan.id));
     expect(assets).toHaveLength(0);
+  });
+
+  it('stores non-Latin-1 headers and page content without failing the scan', async () => {
+    // A WIN1252 database rejects every one of these outright, and the
+    // rejection message quotes the offending character back — so the failure
+    // path then fails too and the scan wedges in `running`. Both halves of
+    // that are covered here.
+    failNext = false;
+    const { scan } = await queuedScan();
+
+    await runScan(scan.id, `${origin}/emoji`);
+
+    const after = await db.query.scans.findFirst({ where: eq(scans.id, scan.id) });
+    expect(after?.status).toBe('succeeded');
+    expect(after?.responseHeaders?.['x-olaf']).toBe('⛄');
+    expect(after?.responseHeaders?.['x-greeting']).toBe('नमस्ते');
+
+    const html = (
+      await db.select().from(scanAssets).where(eq(scanAssets.scanId, scan.id))
+    ).find((a) => a.kind === 'html')!;
+    const body = await getStorage().get(html.storageKey);
+    expect(body.toString('utf8')).toContain('日本語 · emoji 🎉');
+  });
+
+  it('truncates an enormous error message rather than storing it whole', () => {
+    // Driver errors quote the entire failed statement, parameters included.
+    const huge = new Error('x'.repeat(50_000));
+    const stored = errorMessageFor(huge);
+    expect(stored.length).toBeLessThan(2_100);
+    expect(stored.endsWith('…')).toBe(true);
   });
 
   it('404s a scan id that does not exist', async () => {

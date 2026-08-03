@@ -53,6 +53,11 @@ export async function setup(): Promise<void> {
     // Manual cleanup below — with persistent:false the library deletes the
     // data dir during stop(), which races Windows' file lock and throws EBUSY.
     persistent: true,
+    // UTF-8 explicitly: on Windows initdb otherwise picks up the system locale
+    // and builds a WIN1252 cluster, which rejects anything outside Latin-1.
+    // The crawler stores real response headers and real page content, so the
+    // test database has to accept the same bytes production would.
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
     onLog: () => {},
     onError: () => {},
   });

@@ -144,9 +144,63 @@ export const screenshots = pgTable(
   (t) => [index('ix_screenshots_scan').on(t.scanId)],
 );
 
+export const TECH_CATEGORIES = [
+  'framework',
+  'cms',
+  'ecommerce',
+  'ui',
+  'animation',
+  'library',
+  'language',
+  'server',
+  'hosting',
+  'cdn',
+  'analytics',
+  'fonts',
+  'other',
+] as const;
+
+export type TechCategory = (typeof TECH_CATEGORIES)[number];
+
+/**
+ * What a scan concluded the site is built with — module 2 of requirement.md §7.
+ *
+ * Rows are per scan, not per website, so §23's timeline can diff two scans and
+ * say "Next.js 14 → 15 on this date". `confidence` exists because the evidence
+ * genuinely differs in strength: a `__NEXT_DATA__` global is proof, a
+ * `/_next/` URL is strong, a class name that merely looks like Tailwind is a
+ * guess. `evidence` records what triggered the match so a wrong answer is
+ * debuggable rather than mysterious.
+ */
+export const technologies = pgTable(
+  'technologies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scanId: uuid('scan_id')
+      .notNull()
+      .references(() => scans.id, { onDelete: 'cascade' }),
+
+    name: varchar('name', { length: 80 }).notNull(),
+    category: varchar('category', { length: 20 }).notNull().$type<TechCategory>(),
+    version: varchar('version', { length: 40 }),
+    /** 0–100. See the note above on why this is not a boolean. */
+    confidence: integer('confidence').notNull().default(50),
+    evidence: jsonb('evidence').$type<string[]>().notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_technologies_scan_name').on(t.scanId, t.name),
+    index('ix_technologies_scan').on(t.scanId),
+    index('ix_technologies_name').on(t.name),
+  ],
+);
+
 export type Website = typeof websites.$inferSelect;
 export type NewWebsite = typeof websites.$inferInsert;
 export type Scan = typeof scans.$inferSelect;
 export type NewScan = typeof scans.$inferInsert;
 export type ScanAsset = typeof scanAssets.$inferSelect;
 export type Screenshot = typeof screenshots.$inferSelect;
+export type Technology = typeof technologies.$inferSelect;
+export type NewTechnology = typeof technologies.$inferInsert;

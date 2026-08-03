@@ -83,6 +83,13 @@ scansRouter.get('/:id', async (req, res) => {
     },
     assets: detail.assets,
     screenshot: detail.screenshot,
+    technologies: detail.technologies.map((t) => ({
+      name: t.name,
+      category: t.category,
+      version: t.version,
+      confidence: t.confidence,
+      evidence: t.evidence,
+    })),
   });
 });
 

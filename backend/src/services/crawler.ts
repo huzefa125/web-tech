@@ -38,9 +38,83 @@ export interface CrawlResult {
   html: Buffer;
   assets: CapturedAsset[];
   screenshot: { body: Buffer; width: number; height: number };
+  /** Globals present on `window` — the strongest signals module 2 has. */
+  globals: string[];
+  /**
+   * Cookie names the site set. Often the only surviving evidence of what runs
+   * on the server: a CDN strips `x-powered-by`, but `PHPSESSID` or
+   * `JSESSIONID` still has to reach the browser for the app to work.
+   */
+  cookies: string[];
   /** Non-fatal problems worth surfacing on the scan (e.g. assets skipped). */
   warnings: string[];
 }
+
+/**
+ * Globals worth asking about. A whitelist rather than an enumeration of
+ * `window`: every page has hundreds of properties, almost all irrelevant, and
+ * serialising them back across the CDP boundary is slow and occasionally
+ * throws on exotic getters.
+ */
+const PROBE_GLOBALS = [
+  '__NEXT_DATA__',
+  '__NUXT__',
+  '__remixContext',
+  '__sveltekit',
+  '__NEXT_LOADED_PAGES__',
+  '_astro',
+  'React',
+  'ReactDOM',
+  'Vue',
+  'ng',
+  'getAllAngularRootElements',
+  'angular',
+  'jQuery',
+  '$',
+  'Shopify',
+  'wp',
+  'Drupal',
+  'Joomla',
+  'Alpine',
+  'htmx',
+  'gtag',
+  'dataLayer',
+  'ga',
+  'fbq',
+  'analytics',
+  'Sentry',
+  'Stripe',
+  'webpackChunk',
+  '__webpack_require__',
+  '__vite__',
+  '__APOLLO_CLIENT__',
+
+  // Animation and 3D. These almost always leave a global even when the rest of
+  // the page is bundled, which makes them the cheapest reliable signal for a
+  // category that is otherwise buried in minified chunks.
+  'gsap',
+  'TweenMax',
+  'TweenLite',
+  'ScrollTrigger',
+  'Motion',
+  'THREE',
+  'lottie',
+  'bodymovin',
+  'AOS',
+  'anime',
+  'Swiper',
+  'LocomotiveScroll',
+  'Lenis',
+  'ScrollReveal',
+  'ScrollMagic',
+  'WOW',
+  'Splide',
+  'rive',
+  'particlesJS',
+  'tsParticles',
+  'VANTA',
+  'barba',
+] as const;
 
 let browser: Browser | null = null;
 
@@ -166,6 +240,42 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
     }
 
     const html = Buffer.from(await page.content(), 'utf8');
+
+    // Probing runs in the page, so a global defined by a bundle we could not
+    // read is still visible. A page that throws on property access must not
+    // fail the scan, hence the per-key try.
+    let globals: string[] = [];
+    try {
+      globals = await page.evaluate((names: readonly string[]) => {
+        const found: string[] = [];
+        // globalThis, not window: this closure is typed against the backend's
+        // tsconfig, which has no DOM lib. At runtime it is the page's window.
+        const scope = globalThis as unknown as Record<string, unknown>;
+        for (const name of names) {
+          try {
+            if (scope[name] !== undefined && scope[name] !== null) found.push(name);
+          } catch {
+            // Cross-origin or throwing getter — treat as absent.
+          }
+        }
+        return found;
+      }, PROBE_GLOBALS);
+    } catch (err) {
+      warnings.push('Could not read page globals');
+      logger.debug({ err }, 'global probe failed');
+    }
+
+    // Read from the context rather than parsing Set-Cookie: this also catches
+    // cookies written by JavaScript, and the header is frequently absent on a
+    // cached response even though the cookie is very much in play.
+    let cookies: string[] = [];
+    try {
+      cookies = [...new Set((await context.cookies()).map((c) => c.name))];
+    } catch (err) {
+      warnings.push('Could not read cookies');
+      logger.debug({ err }, 'cookie read failed');
+    }
+
     const screenshot = await page.screenshot({ type: 'png', fullPage: false });
 
     if (seen.size > assets.length) {
@@ -187,6 +297,8 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
         width: env.CRAWLER_VIEWPORT_WIDTH,
         height: env.CRAWLER_VIEWPORT_HEIGHT,
       },
+      globals,
+      cookies,
       warnings,
     };
   } finally {

@@ -55,6 +55,12 @@ async function main(): Promise<void> {
     port: PORT,
     // Data survives restarts — this is a dev database, not a test fixture.
     persistent: true,
+    // Without this, initdb inherits the Windows system locale and creates a
+    // WIN1252 cluster. The crawler stores whatever the web sends it, and the
+    // web is UTF-8: wordpress.org alone serves an `x-olaf: ⛄` header, which a
+    // WIN1252 database rejects outright. docker-compose's postgres image
+    // already defaults to UTF-8; this makes the two paths behave the same.
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
     onLog: () => {},
     onError: (err: unknown) => console.error('[dev-db]', err),
   });

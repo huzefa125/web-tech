@@ -65,6 +65,32 @@ export interface ScanDetail {
   };
   assets: ScanAsset[];
   screenshot: { id: string; width: number; height: number; byteSize: number } | null;
+  technologies: Technology[];
+}
+
+export type TechCategory =
+  | 'framework'
+  | 'cms'
+  | 'ecommerce'
+  | 'ui'
+  | 'animation'
+  | 'library'
+  | 'language'
+  | 'server'
+  | 'hosting'
+  | 'cdn'
+  | 'analytics'
+  | 'fonts'
+  | 'other';
+
+export interface Technology {
+  name: string;
+  category: TechCategory;
+  version: string | null;
+  /** 0–100. Below ~60 the detector is guessing; the UI says so. */
+  confidence: number;
+  /** Why the detector concluded this — shown so a wrong call is explicable. */
+  evidence: string[];
 }
 
 export interface Quota {

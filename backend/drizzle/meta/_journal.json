@@ -15,6 +15,13 @@
       "when": 1785748178124,
       "tag": "0001_scans",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785754196922,
+      "tag": "0002_technologies",
+      "breakpoints": true
     }
   ]
 }
