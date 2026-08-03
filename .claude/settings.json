@@ -9,7 +9,8 @@
       "Bash(npm uninstall *)",
       "Bash(npx --yes shadcn@latest add form --yes)",
       "Bash(pkill -f \"next start\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }
