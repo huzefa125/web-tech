@@ -118,7 +118,9 @@ UI polls.
 
 ## The detection engine
 
-`backend/src/services/detectors/`
+`backend/src/services/detectors/` — **every rule is listed in
+[detectors/README.md](backend/src/services/detectors/README.md)**, generated from the
+rule set itself so the documentation cannot drift from the code.
 
 Detection is a **pure function** over captured data — no database, no network,
 no browser. That is deliberate: it means the rule set can be tested against
