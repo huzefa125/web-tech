@@ -82,6 +82,14 @@ const envSchema = z.object({
   // ---- Queue --------------------------------------------------------
   SCAN_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(2),
   SCAN_JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  /**
+   * 'redis' is the real thing: BullMQ, a separate worker process, retries.
+   * 'inline' runs the crawl in the API process instead, for development on a
+   * machine with no Redis. It has no retries, no backpressure and no
+   * durability — a restart loses in-flight scans — so it refuses to start in
+   * production.
+   */
+  SCAN_QUEUE_DRIVER: z.enum(['redis', 'inline']).default('redis'),
 
   // ---- Quotas (§6) --------------------------------------------------
   FREE_SCANS_PER_DAY: z.coerce.number().int().positive().default(5),
@@ -118,6 +126,14 @@ export const env = parsed.data;
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+if (isProduction && env.SCAN_QUEUE_DRIVER === 'inline') {
+  console.error(
+    'SCAN_QUEUE_DRIVER=inline is a development-only fallback and must not run in production: ' +
+      'it drops in-flight scans on restart and runs Playwright inside the API process.',
+  );
+  process.exit(1);
+}
 
 export const googleOAuthConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 export const githubOAuthConfigured = Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);

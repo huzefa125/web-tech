@@ -28,3 +28,6 @@ backend/.pg-test-data/
 # captured scan artefacts (local storage driver)
 backend/.storage/
 backend/.storage-test/
+
+# dev postgres cluster (npm run db:dev)
+backend/.pg-dev-data/

@@ -3,6 +3,7 @@
 import { Queue } from 'bullmq';
 
 import { env } from '../config/env.js';
+import { logger } from '../lib/logger.js';
 import { getQueueConnection } from './connection.js';
 
 export const SCAN_QUEUE_NAME = 'scans';
@@ -34,8 +35,23 @@ export function getScanQueue(): Queue<ScanJobData> {
 /**
  * Enqueue a scan. The job id is the scan id, which makes enqueueing idempotent:
  * a retried request for the same scan row cannot produce two crawls.
+ *
+ * Under the inline driver there is no queue at all — the crawl is started in
+ * this process and deliberately not awaited, so the HTTP response still
+ * returns immediately and the polling UI behaves the same. See
+ * SCAN_QUEUE_DRIVER in config/env.ts for what that costs.
  */
 export async function enqueueScan(data: ScanJobData): Promise<string> {
+  if (env.SCAN_QUEUE_DRIVER === 'inline') {
+    const { runScan } = await import('../services/scan-service.js');
+    void runScan(data.scanId, data.url).catch((err: unknown) => {
+      // runScan has already recorded the failure on the row; without this
+      // catch the rejection would be unhandled and could kill the process.
+      logger.warn({ err, scanId: data.scanId }, 'inline scan failed');
+    });
+    return data.scanId;
+  }
+
   const job = await getScanQueue().add('crawl', data, { jobId: data.scanId });
   return job.id!;
 }
