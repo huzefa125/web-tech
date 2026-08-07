@@ -7,7 +7,7 @@
  *      at a point in time. §1 of the spec makes historical diffing the core
  *      differentiator, so nothing here ever overwrites a previous scan — every
  *      run appends.
- *   2. Captured bytes (HTML, CSS, JS, screenshots) do not belong in Postgres.
+ *   2. Captured bytes (HTML, CSS, JS) do not belong in Postgres.
  *      Rows hold metadata and a storage key; the payload lives behind the
  *      storage adapter.
  */
@@ -124,26 +124,6 @@ export const scanAssets = pgTable(
   ],
 );
 
-export const screenshots = pgTable(
-  'screenshots',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    scanId: uuid('scan_id')
-      .notNull()
-      .references(() => scans.id, { onDelete: 'cascade' }),
-
-    storageKey: text('storage_key').notNull(),
-    width: integer('width').notNull(),
-    height: integer('height').notNull(),
-    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
-    /** 'viewport' or 'fullPage' — the dashboard wants both eventually. */
-    kind: varchar('kind', { length: 20 }).notNull().default('viewport'),
-
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index('ix_screenshots_scan').on(t.scanId)],
-);
-
 export const TECH_CATEGORIES = [
   'framework',
   'cms',
@@ -208,6 +188,5 @@ export type NewWebsite = typeof websites.$inferInsert;
 export type Scan = typeof scans.$inferSelect;
 export type NewScan = typeof scans.$inferInsert;
 export type ScanAsset = typeof scanAssets.$inferSelect;
-export type Screenshot = typeof screenshots.$inferSelect;
 export type Technology = typeof technologies.$inferSelect;
 export type NewTechnology = typeof technologies.$inferInsert;

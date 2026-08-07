@@ -92,13 +92,13 @@ describe('crawlTarget', () => {
     expect(result.finalUrl).toBe(`${origin}/`);
   });
 
-  it('takes a screenshot at the configured viewport', async () => {
+  it('records every URL the page requested, not just its assets', async () => {
+    // assetUrls holds only the stylesheets and scripts whose bodies were kept;
+    // requestUrls is the superset the service-integration rules read.
     const result = await crawlTarget(target());
 
-    expect(result.screenshot.width).toBe(1440);
-    expect(result.screenshot.height).toBe(900);
-    // PNG magic number — proves it is an image, not an error page.
-    expect(result.screenshot.body.subarray(0, 4).toString('hex')).toBe('89504e47');
+    expect(result.requestUrls.some((u) => u.endsWith('/styles.css'))).toBe(true);
+    expect(result.requestUrls.length).toBeGreaterThanOrEqual(result.assets.length);
   });
 
   it('still produces a scan for a 404 page', async () => {

@@ -64,7 +64,6 @@ export interface ScanDetail {
     finishedAt: string | null;
   };
   assets: ScanAsset[];
-  screenshot: { id: string; width: number; height: number; byteSize: number } | null;
   technologies: Technology[];
 }
 

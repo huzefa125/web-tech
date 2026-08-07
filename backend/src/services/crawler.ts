@@ -37,7 +37,6 @@ export interface CrawlResult {
   loadTimeMs: number;
   html: Buffer;
   assets: CapturedAsset[];
-  screenshot: { body: Buffer; width: number; height: number };
   /**
    * Every URL the page requested, of any kind — XHR, fetch, images, fonts,
    * iframes, beacons. `assets` covers only the stylesheets and scripts whose
@@ -413,8 +412,6 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
     const manifest = await fetchText(page, manifestHref(await page.content()), target.url);
     const robots = await fetchText(page, '/robots.txt', target.url);
 
-    const screenshot = await page.screenshot({ type: 'png', fullPage: false });
-
     if (seen.size > assets.length) {
       warnings.push(
         `${seen.size - assets.length} additional asset(s) were not stored (cap: ${env.CRAWLER_MAX_ASSETS})`,
@@ -429,11 +426,6 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
       loadTimeMs,
       html,
       assets,
-      screenshot: {
-        body: screenshot,
-        width: env.CRAWLER_VIEWPORT_WIDTH,
-        height: env.CRAWLER_VIEWPORT_HEIGHT,
-      },
       requestUrls: [...requested],
       manifest,
       serviceWorkers,

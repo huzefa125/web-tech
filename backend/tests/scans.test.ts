@@ -229,7 +229,7 @@ describe('GET /scans/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.scan).toMatchObject({ status: 'queued', host: 'example.com' });
     expect(res.body.assets).toEqual([]);
-    expect(res.body.screenshot).toBeNull();
+    expect(res.body.technologies).toEqual([]);
   });
 
   it('404s another user scan rather than 403ing it', async () => {
@@ -255,18 +255,6 @@ describe('GET /scans/:id', () => {
     expect(res.status).toBe(404);
   });
 
-  it('404s a screenshot that does not exist yet', async () => {
-    const { token } = await signedIn();
-    const created = await api()
-      .post(SCANS)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ url: 'example.com' });
-
-    const res = await api()
-      .get(`${SCANS}/${created.body.scan.id}/screenshot`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(404);
-  });
 });
 
 describe('auth surface is unchanged', () => {

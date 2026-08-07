@@ -5,7 +5,6 @@ import { ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
-import { ScanScreenshot } from '@/components/scan-screenshot';
 import { ScanStatusBadge, isPending } from '@/components/scan-status-badge';
 import { TechnologyList } from '@/components/technology-list';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -58,7 +57,7 @@ export default function ScanDetailPage() {
     );
   }
 
-  const { scan, assets, screenshot, technologies } = query.data;
+  const { scan, assets, technologies } = query.data;
   const css = assets.filter((a) => a.kind === 'css');
   const js = assets.filter((a) => a.kind === 'js');
   const html = assets.find((a) => a.kind === 'html');
@@ -112,9 +111,10 @@ export default function ScanDetailPage() {
         <Stat label="Assets captured" value={assets.length.toString()} />
       </div>
 
-      <Tabs defaultValue="overview" className="mt-8">
+      {/* Technology first, and by default: it is the answer the user came for.
+          Assets and headers are the working behind it. */}
+      <Tabs defaultValue="technology" className="mt-8">
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="technology">
             Technology
             {technologies.length > 0 ? (
@@ -123,19 +123,12 @@ export default function ScanDetailPage() {
               </span>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger value="assets">Assets</TabsTrigger>
+          <TabsTrigger value="assets">
+            Assets
+            <span className="text-muted-foreground ml-1.5 tabular-nums">{assets.length}</span>
+          </TabsTrigger>
           <TabsTrigger value="headers">Headers</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="overview" className="mt-4">
-          {screenshot ? (
-            <ScanScreenshot scanId={scan.id} alt={`Screenshot of ${scan.host}`} />
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              No screenshot yet. It is captured when the crawl finishes.
-            </p>
-          )}
-        </TabsContent>
 
         <TabsContent value="technology" className="mt-4">
           <TechnologyList technologies={technologies} />

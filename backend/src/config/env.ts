@@ -59,7 +59,7 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default('Internet Intelligence <noreply@example.com>'),
 
   // ---- Storage ------------------------------------------------------
-  // Captured HTML/CSS/JS and screenshots. Local disk in dev; R2 in production
+  // Captured HTML, CSS and JS. Local disk in dev; R2 in production
   // once the bucket exists — see src/lib/storage.ts.
   STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
   STORAGE_LOCAL_ROOT: z.string().default('./.storage'),

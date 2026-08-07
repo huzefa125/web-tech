@@ -42,7 +42,7 @@ afterEach(async () => {
   // CASCADE handles the FKs; RESTART IDENTITY keeps sequences predictable.
   await sqlClient.unsafe(
     'TRUNCATE TABLE users, oauth_accounts, refresh_tokens, verification_tokens, ' +
-      'websites, scans, scan_assets, screenshots, technologies RESTART IDENTITY CASCADE',
+      'websites, scans, scan_assets, technologies RESTART IDENTITY CASCADE',
   );
 
   const { redis } = await import('../src/lib/redis.js');

@@ -9,7 +9,7 @@
  * The R2 driver is deliberately not implemented yet: no bucket exists, and a
  * driver that cannot be exercised is a driver that is wrong. It throws on
  * construction rather than silently degrading to local disk in production,
- * where a scan's screenshots would then live on an ephemeral container's
+ * where a scan's captured bytes would then live on an ephemeral container's
  * filesystem and vanish on redeploy.
  */
 

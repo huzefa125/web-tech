@@ -236,13 +236,6 @@ export const api = {
 
   quota: () => request<Quota>('/scans/quota'),
 
-  /**
-   * Screenshot bytes. Goes through `request` rather than being handed to an
-   * <img src>, because the endpoint is bearer-authenticated and an img tag
-   * cannot send an Authorization header. Callers wrap the blob in an object
-   * URL and revoke it on unmount.
-   */
-  getScreenshot: (id: string) => request<Blob>(`/scans/${id}/screenshot`),
 };
 
 export { BASE_URL };

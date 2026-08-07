@@ -9,7 +9,6 @@
 import { Router } from 'express';
 
 import { notFound } from '../../lib/errors.js';
-import { getStorage } from '../../lib/storage.js';
 import { createScanSchema, listScansSchema, scanIdSchema } from '../../schemas/scans.js';
 import * as scanService from '../../services/scan-service.js';
 import { requireAuth } from '../middleware/authenticate.js';
@@ -82,7 +81,6 @@ scansRouter.get('/:id', async (req, res) => {
       finishedAt: detail.scan.finishedAt?.toISOString() ?? null,
     },
     assets: detail.assets,
-    screenshot: detail.screenshot,
     technologies: detail.technologies.map((t) => ({
       name: t.name,
       category: t.category,
@@ -91,20 +89,4 @@ scansRouter.get('/:id', async (req, res) => {
       evidence: t.evidence,
     })),
   });
-});
-
-/** The captured screenshot bytes. */
-scansRouter.get('/:id/screenshot', async (req, res) => {
-  const id = scanIdSchema.safeParse(req.params.id);
-  if (!id.success) throw notFound('Scan not found');
-
-  const detail = await scanService.getScanDetail(id.data);
-  if (!detail || detail.scan.requestedBy !== req.user!.id) throw notFound('Scan not found');
-  if (!detail.screenshot) throw notFound('No screenshot for this scan');
-
-  const { storageKey } = (await scanService.getScreenshotRef(detail.screenshot.id)) ?? {};
-  if (!storageKey) throw notFound('No screenshot for this scan');
-
-  const body = await getStorage().get(storageKey);
-  res.type('image/png').send(body);
 });

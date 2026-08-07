@@ -16,7 +16,6 @@ import type { Plan } from '../db/schema/auth.js';
 import {
   scanAssets,
   scans,
-  screenshots,
   technologies,
   websites,
   type Scan,
@@ -290,20 +289,6 @@ export async function runScan(scanId: string, url: string): Promise<void> {
       );
     }
 
-    const shotPut = await storage.put(
-      scanKey(scanId, 'screenshot.png'),
-      result.screenshot.body,
-      'image/png',
-    );
-    await db.insert(screenshots).values({
-      scanId,
-      storageKey: shotPut.storageKey,
-      width: result.screenshot.width,
-      height: result.screenshot.height,
-      byteSize: shotPut.byteSize,
-      kind: 'viewport',
-    });
-
     await markStatus(scanId, 'succeeded', {
       finalUrl: result.finalUrl,
       httpStatus: result.httpStatus,
@@ -336,7 +321,6 @@ export interface ScanDetail {
   scan: Scan;
   website: Website;
   assets: { id: string; kind: string; url: string; byteSize: number; contentType: string | null }[];
-  screenshot: { id: string; width: number; height: number; byteSize: number } | null;
   technologies: Technology[];
 }
 
@@ -358,37 +342,13 @@ export async function getScanDetail(scanId: string): Promise<ScanDetail | null> 
     .from(scanAssets)
     .where(eq(scanAssets.scanId, scanId));
 
-  const shots = await db
-    .select({
-      id: screenshots.id,
-      width: screenshots.width,
-      height: screenshots.height,
-      byteSize: screenshots.byteSize,
-    })
-    .from(screenshots)
-    .where(eq(screenshots.scanId, scanId))
-    .limit(1);
-
   const techs = await db
     .select()
     .from(technologies)
     .where(eq(technologies.scanId, scanId))
     .orderBy(desc(technologies.confidence), technologies.name);
 
-  return { scan, website, assets, screenshot: shots[0] ?? null, technologies: techs };
-}
-
-/** Storage location of a screenshot. Kept out of ScanDetail — the key is an
- *  internal detail the API must not hand to clients. */
-export async function getScreenshotRef(
-  screenshotId: string,
-): Promise<{ storageKey: string } | null> {
-  const rows = await db
-    .select({ storageKey: screenshots.storageKey })
-    .from(screenshots)
-    .where(eq(screenshots.id, screenshotId))
-    .limit(1);
-  return rows[0] ?? null;
+  return { scan, website, assets, technologies: techs };
 }
 
 /** A user's own scans, newest first. */

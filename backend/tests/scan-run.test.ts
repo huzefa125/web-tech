@@ -14,7 +14,7 @@ import { rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { db } from '../src/db/index.js';
-import { scanAssets, scans, screenshots, websites } from '../src/db/schema/scans.js';
+import { scanAssets, scans, websites } from '../src/db/schema/scans.js';
 import { AppError } from '../src/lib/errors.js';
 import { getStorage } from '../src/lib/storage.js';
 import { createUser } from './helpers.js';
@@ -135,19 +135,6 @@ describe('runScan', () => {
     const body = await getStorage().get(html.storageKey);
     expect(body.toString('utf8')).toContain('persisted');
     expect(body.byteLength).toBe(html.byteSize);
-  });
-
-  it('stores a screenshot row and a readable PNG', async () => {
-    failNext = false;
-    const { scan } = await queuedScan();
-    await runScan(scan.id, origin);
-
-    const shot = (await db.select().from(screenshots).where(eq(screenshots.scanId, scan.id)))[0]!;
-    expect(shot.width).toBe(1440);
-    expect(shot.height).toBe(900);
-
-    const png = await getStorage().get(shot.storageKey);
-    expect(png.subarray(0, 4).toString('hex')).toBe('89504e47');
   });
 
   it('records the failure on the row and rethrows so BullMQ can retry', async () => {
