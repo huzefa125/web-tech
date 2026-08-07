@@ -26,7 +26,7 @@ import {
 } from '../db/schema/scans.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import { resolveTarget } from '../lib/scan-target.js';
+import { lookupDnsRecords, resolveTarget } from '../lib/scan-target.js';
 import { getStorage, scanKey } from '../lib/storage.js';
 import { crawl, type CapturedAsset } from './crawler.js';
 import { detect } from './detectors/index.js';
@@ -249,11 +249,17 @@ export async function runScan(scanId: string, url: string): Promise<void> {
     // Detection runs on what was just captured, in memory. The same inputs are
     // all persisted, so a future rule can be replayed against an old scan
     // without re-crawling the site.
+    // DNS is looked up here rather than in the crawler: it is not part of
+    // rendering the page, and a failure must not cost us the crawl we already
+    // paid for.
+    const dns = await lookupDnsRecords(result.target.host).catch(() => []);
+
     const detections = detect({
       html: result.html.toString('utf8'),
       // Header names arrive lowercased from Playwright, which the rules assume.
       headers: result.responseHeaders,
       assetUrls: result.assets.map((a) => a.url),
+      requestUrls: result.requestUrls,
       globals: result.globals,
       cookies: result.cookies,
       css: result.assets
@@ -265,6 +271,10 @@ export async function runScan(scanId: string, url: string): Promise<void> {
         .map((a) => a.body.toString('utf8'))
         .join('\n'),
       finalUrl: result.finalUrl,
+      manifest: result.manifest ?? undefined,
+      serviceWorkers: result.serviceWorkers,
+      robots: result.robots ?? undefined,
+      dns,
     });
 
     if (detections.length > 0) {

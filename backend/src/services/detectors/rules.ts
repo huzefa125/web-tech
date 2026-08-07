@@ -22,12 +22,24 @@ export interface Signal {
   in:
     | 'html'
     | 'assetUrl'
+    | 'request'
+    | 'scriptSrc'
+    | 'inlineScript'
+    | 'inlineStyle'
     | 'global'
     | 'header'
     | 'css'
     | 'js'
+    | 'meta'
     | 'metaGenerator'
+    | 'bodyClass'
+    | 'formAction'
+    | 'iframe'
     | 'cookie'
+    | 'manifest'
+    | 'serviceWorker'
+    | 'robots'
+    | 'dns'
     | 'url';
   /** What to look for. Strings are substring matches; regexes are tested. */
   match: string | RegExp;
@@ -55,7 +67,7 @@ const g = (name: string, confidence: number, evidence: string): Signal => ({
   evidence,
 });
 
-export const RULES: Rule[] = [
+const RAW_RULES: Rule[] = [
   // ------------------------------------------------------------ frameworks
   {
     name: 'Next.js',
@@ -274,11 +286,11 @@ export const RULES: Rule[] = [
     g('__APOLLO_CLIENT__', 90, 'Apollo Client global is present'),
     { in: 'js', match: /\/graphql["'`]/, confidence: 60, evidence: 'References a /graphql endpoint' },
   ] },
-  { name: 'webpack', category: 'library', signals: [
+  { name: 'webpack', category: 'build', signals: [
     g('webpackChunk', 85, 'webpack chunk global is present'),
     g('__webpack_require__', 90, 'webpack runtime is present'),
   ] },
-  { name: 'Vite', category: 'library', signals: [
+  { name: 'Vite', category: 'build', signals: [
     { in: 'assetUrl', match: '/@vite/client', confidence: 95, evidence: 'Loads the Vite dev client' },
     { in: 'html', match: 'type="module" crossorigin src="/assets/', confidence: 60, evidence: 'Vite-style module entry' },
   ] },
@@ -387,7 +399,7 @@ export const RULES: Rule[] = [
     g('fbq', 90, 'window.fbq is defined'),
     { in: 'assetUrl', match: 'connect.facebook.net', confidence: 90, evidence: 'Loads the Facebook SDK' },
   ] },
-  { name: 'Sentry', category: 'analytics', signals: [
+  { name: 'Sentry', category: 'monitoring', signals: [
     g('Sentry', 90, 'window.Sentry is defined'),
     { in: 'assetUrl', match: /browser\.sentry-cdn\.com|\/sentry[.-]/i, confidence: 85, evidence: 'Loads a Sentry bundle' },
   ] },
@@ -646,12 +658,12 @@ export const RULES: Rule[] = [
 
   // Cookie-only reinforcements for stacks already declared above. Rules are
   // keyed by name, so these merge into the same entry rather than duplicating.
-  { name: 'Supabase', category: 'other', signals: [
-    { in: 'assetUrl', match: /supabase\.co|supabase\.in/i, confidence: 95, evidence: 'Talks to Supabase' },
+  { name: 'Supabase', category: 'database', signals: [
+    { in: 'request', match: /supabase\.co|supabase\.in/i, confidence: 95, evidence: 'Talks to Supabase' },
     { in: 'cookie', match: /^sb-.*-auth-token$/, confidence: 95, evidence: 'Supabase auth cookie' },
   ] },
-  { name: 'Firebase', category: 'other', signals: [
-    { in: 'assetUrl', match: /firebaseio\.com|firebaseapp\.com|gstatic\.com\/firebasejs/i, confidence: 95, evidence: 'Loads or calls Firebase' },
+  { name: 'Firebase', category: 'database', signals: [
+    { in: 'request', match: /firebaseio\.com|firebaseapp\.com|gstatic\.com\/firebasejs/i, confidence: 95, evidence: 'Loads or calls Firebase' },
   ] },
   { name: 'Strapi', category: 'cms', implies: ['Node.js'], signals: [
     { in: 'header', header: 'x-powered-by', match: /Strapi/i, confidence: 98, evidence: 'x-powered-by: Strapi' },
@@ -660,22 +672,559 @@ export const RULES: Rule[] = [
     { in: 'metaGenerator', match: /Ghost ?([\d.]+)?/i, confidence: 95, evidence: 'generator meta names Ghost', versionFrom: true },
   ] },
   { name: 'Sanity', category: 'cms', signals: [
-    { in: 'assetUrl', match: /cdn\.sanity\.io|apicdn\.sanity\.io/i, confidence: 95, evidence: 'Loads content from Sanity' },
+    { in: 'request', match: /cdn\.sanity\.io|apicdn\.sanity\.io/i, confidence: 95, evidence: 'Loads content from Sanity' },
   ] },
   { name: 'Contentful', category: 'cms', signals: [
-    { in: 'assetUrl', match: /ctfassets\.net|contentful\.com/i, confidence: 95, evidence: 'Loads content from Contentful' },
+    { in: 'request', match: /ctfassets\.net|contentful\.com/i, confidence: 95, evidence: 'Loads content from Contentful' },
   ] },
   { name: 'Prismic', category: 'cms', signals: [
-    { in: 'assetUrl', match: /prismic\.io/i, confidence: 95, evidence: 'Loads content from Prismic' },
+    { in: 'request', match: /prismic\.io/i, confidence: 95, evidence: 'Loads content from Prismic' },
   ] },
   { name: 'Framer', category: 'cms', signals: [
     { in: 'metaGenerator', match: /Framer/i, confidence: 95, evidence: 'generator meta names Framer' },
-    { in: 'assetUrl', match: /framerusercontent\.com/i, confidence: 95, evidence: 'Loads Framer user content' },
+    { in: 'request', match: /framerusercontent\.com/i, confidence: 95, evidence: 'Loads Framer user content' },
   ] },
 
-  // ----------------------------------------------------------------- other
-  { name: 'Stripe', category: 'other', signals: [
+  // ------------------------------------------------ more client frameworks
+  { name: 'SvelteKit', category: 'framework', implies: ['Svelte'], signals: [
+    { in: 'html', match: /\sdata-sveltekit-/, confidence: 95, evidence: 'data-sveltekit-* attributes' },
+    { in: 'assetUrl', match: '/_app/immutable/', confidence: 90, evidence: 'Loads SvelteKit immutable assets' },
+  ] },
+  { name: 'Qwik', category: 'framework', signals: [
+    { in: 'html', match: /\sq:container=/, confidence: 98, evidence: 'q:container attribute' },
+    { in: 'html', match: /\sq:base=/, confidence: 95, evidence: 'q:base attribute' },
+    { in: 'assetUrl', match: /\/build\/q-[0-9a-z]+\.js/i, confidence: 85, evidence: 'Qwik q-* build chunks' },
+  ] },
+  { name: 'SolidJS', category: 'framework', signals: [
+    g('_$HY', 90, 'Solid hydration global is present'),
+    { in: 'js', match: /solid-js\/web|createSignal\(/, confidence: 60, evidence: 'Solid identifiers in the bundle' },
+  ] },
+  { name: 'Preact', category: 'framework', signals: [
+    g('__PREACT_DEVTOOLS__', 95, 'Preact devtools hook is present'),
+    { in: 'assetUrl', match: /preact[.@-]/i, confidence: 85, evidence: 'Loads a Preact bundle' },
+  ] },
+  { name: 'Lit', category: 'framework', signals: [
+    g('litElementVersions', 95, 'window.litElementVersions is present'),
+    g('litHtmlVersions', 95, 'window.litHtmlVersions is present'),
+    { in: 'assetUrl', match: /lit-(html|element)|\/lit[.@-]/i, confidence: 80, evidence: 'Loads a Lit bundle' },
+  ] },
+  { name: 'Stimulus', category: 'framework', signals: [
+    g('Stimulus', 95, 'window.Stimulus is defined'),
+    { in: 'html', match: /\sdata-controller="/, confidence: 80, evidence: 'data-controller attributes' },
+  ] },
+  { name: 'Ember', category: 'framework', signals: [
+    g('Ember', 95, 'window.Ember is defined'),
+    { in: 'html', match: /class="[^"]*\bember-application\b/, confidence: 90, evidence: 'ember-application class' },
+  ] },
+  { name: 'Backbone', category: 'framework', implies: ['jQuery'], signals: [
+    g('Backbone', 95, 'window.Backbone is defined'),
+  ] },
+  { name: 'Inferno', category: 'framework', signals: [
+    g('Inferno', 95, 'window.Inferno is defined'),
+  ] },
+  { name: 'Marko', category: 'framework', signals: [
+    g('$MARKO', 90, 'Marko runtime global is present'),
+  ] },
+  { name: 'Fresh', category: 'framework', implies: ['Deno'], signals: [
+    { in: 'assetUrl', match: '/_frsh/', confidence: 95, evidence: 'Loads /_frsh/ assets' },
+  ] },
+
+  // ------------------------------------------------ more server frameworks
+  { name: 'AdonisJS', category: 'framework', implies: ['Node.js'], signals: [
+    { in: 'cookie', match: 'adonis-session', confidence: 95, evidence: 'adonis-session cookie' },
+  ] },
+  { name: 'Symfony', category: 'framework', implies: ['PHP'], signals: [
+    { in: 'header', header: 'x-debug-token', match: /.+/, confidence: 85, evidence: 'Symfony profiler debug token' },
+    { in: 'cookie', match: 'sf_redirect', confidence: 80, evidence: 'Symfony redirect cookie' },
+  ] },
+  { name: 'CodeIgniter', category: 'framework', implies: ['PHP'], signals: [
+    { in: 'cookie', match: 'ci_session', confidence: 95, evidence: 'ci_session cookie' },
+  ] },
+  { name: 'CakePHP', category: 'framework', implies: ['PHP'], signals: [
+    { in: 'cookie', match: 'CAKEPHP', confidence: 95, evidence: 'CAKEPHP cookie' },
+  ] },
+  { name: 'Spring Boot', category: 'framework', implies: ['Java'], signals: [
+    { in: 'header', header: 'x-application-context', match: /.+/, confidence: 90, evidence: 'x-application-context header' },
+  ] },
+  { name: 'Phoenix', category: 'framework', signals: [
+    g('Phoenix', 90, 'window.Phoenix is defined'),
+    { in: 'assetUrl', match: /phoenix[.@_-]/i, confidence: 75, evidence: 'Loads a Phoenix bundle' },
+  ] },
+
+  // ---------------------------------------------------------- more CMS
+  { name: 'TYPO3', category: 'cms', implies: ['PHP'], signals: [
+    { in: 'metaGenerator', match: /TYPO3/i, confidence: 95, evidence: 'generator meta names TYPO3' },
+  ] },
+  { name: 'Craft CMS', category: 'cms', implies: ['PHP'], signals: [
+    { in: 'cookie', match: 'CraftSessionId', confidence: 95, evidence: 'CraftSessionId cookie' },
+    { in: 'header', header: 'x-powered-by', match: /Craft ?CMS/i, confidence: 95, evidence: 'x-powered-by names Craft CMS' },
+  ] },
+  { name: 'Payload CMS', category: 'cms', implies: ['Node.js'], signals: [
+    { in: 'cookie', match: 'payload-token', confidence: 95, evidence: 'payload-token cookie' },
+  ] },
+  { name: 'Directus', category: 'cms', implies: ['Node.js'], signals: [
+    { in: 'cookie', match: 'directus_session_token', confidence: 95, evidence: 'directus session cookie' },
+    { in: 'assetUrl', match: /directus/i, confidence: 70, evidence: 'Loads Directus assets' },
+  ] },
+  { name: 'Hygraph', category: 'cms', signals: [
+    { in: 'request', match: /graphassets\.com|graphcms\.com/i, confidence: 95, evidence: 'Loads media from Hygraph' },
+  ] },
+  { name: 'DatoCMS', category: 'cms', signals: [
+    { in: 'request', match: /datocms-assets\.com/i, confidence: 95, evidence: 'Loads media from DatoCMS' },
+  ] },
+  { name: 'Storyblok', category: 'cms', signals: [
+    { in: 'request', match: /a\.storyblok\.com|storyblok\.com/i, confidence: 95, evidence: 'Loads content from Storyblok' },
+  ] },
+  { name: 'ButterCMS', category: 'cms', signals: [
+    { in: 'request', match: /cdn\.buttercms\.com/i, confidence: 95, evidence: 'Loads media from ButterCMS' },
+  ] },
+
+  // ---------------------------------------------------- more ecommerce
+  { name: 'BigCommerce', category: 'ecommerce', signals: [
+    { in: 'request', match: /cdn\d*\.bigcommerce\.com/i, confidence: 95, evidence: 'Loads BigCommerce assets' },
+    { in: 'header', header: 'x-bc-storefront', match: /.+/, confidence: 95, evidence: 'BigCommerce storefront header' },
+  ] },
+  { name: 'OpenCart', category: 'ecommerce', implies: ['PHP'], signals: [
+    { in: 'cookie', match: 'OCSESSID', confidence: 95, evidence: 'OCSESSID cookie' },
+    { in: 'url', match: /route=common\/home/, confidence: 90, evidence: 'OpenCart route parameter' },
+  ] },
+  { name: 'PrestaShop', category: 'ecommerce', implies: ['PHP'], signals: [
+    { in: 'metaGenerator', match: /PrestaShop/i, confidence: 95, evidence: 'generator meta names PrestaShop' },
+    { in: 'cookie', match: /^PrestaShop-/, confidence: 95, evidence: 'PrestaShop-* cookie' },
+  ] },
+  { name: 'Ecwid', category: 'ecommerce', signals: [
+    g('Ecwid', 95, 'window.Ecwid is defined'),
+    { in: 'request', match: /app\.ecwid\.com/i, confidence: 90, evidence: 'Loads the Ecwid storefront' },
+  ] },
+  { name: 'Snipcart', category: 'ecommerce', signals: [
+    g('Snipcart', 95, 'window.Snipcart is defined'),
+    { in: 'assetUrl', match: /cdn\.snipcart\.com/i, confidence: 95, evidence: 'Loads Snipcart' },
+  ] },
+  { name: 'Saleor', category: 'ecommerce', implies: ['Python'], signals: [
+    { in: 'request', match: /saleor\.cloud|\/graphql\/.*saleor/i, confidence: 80, evidence: 'Talks to a Saleor API' },
+  ] },
+
+  // ------------------------------------------------------- more UI kits
+  { name: 'Ant Design', category: 'ui', signals: [
+    { in: 'html', match: /class="[^"]*\bant-[a-z]/, confidence: 90, evidence: 'ant-* class names' },
+    { in: 'css', match: /\.ant-btn\b/, confidence: 95, evidence: 'Ant Design component styles' },
+  ] },
+  { name: 'Mantine', category: 'ui', signals: [
+    { in: 'html', match: /class="[^"]*\bmantine-/, confidence: 90, evidence: 'mantine-* class names' },
+    { in: 'html', match: /\sdata-mantine-color-scheme=/, confidence: 95, evidence: 'Mantine colour-scheme attribute' },
+  ] },
+  { name: 'Radix UI', category: 'ui', signals: [
+    { in: 'html', match: /\sdata-radix-/, confidence: 95, evidence: 'data-radix-* attributes' },
+    { in: 'html', match: /\bradix-[:a-z0-9]+\b/i, confidence: 80, evidence: 'Radix generated ids' },
+  ] },
+  { name: 'shadcn/ui', category: 'ui', implies: ['Radix UI', 'Tailwind CSS'], signals: [
+    // shadcn is copy-pasted into a project, so there is no bundle to spot. Its
+    // components do stamp data-slot, and they sit on Radix + Tailwind.
+    { in: 'html', match: /\sdata-slot="[a-z-]+"/, confidence: 70, evidence: 'data-slot attributes on components' },
+  ] },
+  { name: 'DaisyUI', category: 'ui', implies: ['Tailwind CSS'], signals: [
+    { in: 'css', match: /--fallback-p|\.btn-primary\{/, confidence: 85, evidence: 'DaisyUI theme variables' },
+    { in: 'html', match: /class="[^"]*\bbtn\b[^"]*\bbtn-(primary|secondary|ghost)\b/, confidence: 60, evidence: 'DaisyUI button classes' },
+  ] },
+  { name: 'Flowbite', category: 'ui', implies: ['Tailwind CSS'], signals: [
+    { in: 'assetUrl', match: /flowbite/i, confidence: 95, evidence: 'Loads Flowbite' },
+  ] },
+  { name: 'Semantic UI', category: 'ui', signals: [
+    { in: 'assetUrl', match: /semantic(\.min)?\.(css|js)/i, confidence: 90, evidence: 'Loads Semantic UI' },
+    { in: 'css', match: /\.ui\.button\b/, confidence: 85, evidence: 'Semantic UI component styles' },
+  ] },
+  { name: 'Bulma', category: 'ui', signals: [
+    { in: 'assetUrl', match: /bulma(\.min)?\.css/i, confidence: 95, evidence: 'Loads Bulma' },
+    { in: 'css', match: /\.column\.is-\d/, confidence: 80, evidence: 'Bulma grid classes' },
+  ] },
+  { name: 'Foundation', category: 'ui', signals: [
+    { in: 'assetUrl', match: /foundation(\.min)?\.(css|js)/i, confidence: 90, evidence: 'Loads Foundation' },
+  ] },
+  { name: 'Vuetify', category: 'ui', implies: ['Vue.js'], signals: [
+    { in: 'html', match: /class="[^"]*\bv-application\b/, confidence: 95, evidence: 'v-application root class' },
+    { in: 'assetUrl', match: /vuetify/i, confidence: 90, evidence: 'Loads Vuetify' },
+  ] },
+  { name: 'PrimeReact', category: 'ui', implies: ['React'], signals: [
+    { in: 'assetUrl', match: /primereact/i, confidence: 95, evidence: 'Loads PrimeReact' },
+  ] },
+  { name: 'PrimeVue', category: 'ui', implies: ['Vue.js'], signals: [
+    { in: 'assetUrl', match: /primevue/i, confidence: 95, evidence: 'Loads PrimeVue' },
+  ] },
+  { name: 'Quasar', category: 'ui', implies: ['Vue.js'], signals: [
+    { in: 'html', match: /class="[^"]*\bq-(app|layout|page)\b/, confidence: 95, evidence: 'Quasar layout classes' },
+  ] },
+
+  // ------------------------------------------------------- more 3D / canvas
+  { name: 'Babylon.js', category: 'animation', signals: [
+    g('BABYLON', 98, 'window.BABYLON is defined'),
+    { in: 'assetUrl', match: /babylon(\.min)?\.js/i, confidence: 90, evidence: 'Loads a Babylon.js bundle' },
+  ] },
+  { name: 'PixiJS', category: 'animation', signals: [
+    g('PIXI', 98, 'window.PIXI is defined'),
+    { in: 'assetUrl', match: /pixi(\.min)?\.js/i, confidence: 90, evidence: 'Loads a PixiJS bundle' },
+  ] },
+  { name: 'Matter.js', category: 'animation', signals: [
+    g('Matter', 90, 'window.Matter is defined'),
+    { in: 'assetUrl', match: /matter(\.min)?\.js/i, confidence: 85, evidence: 'Loads a Matter.js bundle' },
+  ] },
+
+  // ------------------------------------------------------------ build tools
+  { name: 'Parcel', category: 'build', signals: [
+    g('parcelRequire', 95, 'window.parcelRequire is defined'),
+  ] },
+
+  // -------------------------------------------------------- more languages
+  { name: 'Deno', category: 'language', signals: [
+    { in: 'header', header: 'server', match: /deno\/?([\d.]+)?/i, confidence: 90, evidence: 'server header names Deno', versionFrom: true },
+  ] },
+  { name: 'Ruby', category: 'language', signals: [
+    { in: 'header', header: 'server', match: /(Puma|WEBrick|Unicorn)\/?([\d.]+)?/i, confidence: 85, evidence: 'Ruby application server in the server header' },
+  ] },
+
+  // ---------------------------------------------------------- more hosting
+  { name: 'Railway', category: 'hosting', signals: [
+    { in: 'header', header: 'x-railway-request-id', match: /.+/, confidence: 98, evidence: 'x-railway-request-id header' },
+  ] },
+  { name: 'Fly.io', category: 'hosting', signals: [
+    { in: 'header', header: 'fly-request-id', match: /.+/, confidence: 98, evidence: 'fly-request-id header' },
+  ] },
+  { name: 'AWS Amplify', category: 'hosting', signals: [
+    { in: 'url', match: /amplifyapp\.com/i, confidence: 90, evidence: 'Served from an amplifyapp.com domain' },
+  ] },
+  { name: 'Azure Static Web Apps', category: 'hosting', signals: [
+    { in: 'header', header: 'x-azure-ref', match: /.+/, confidence: 90, evidence: 'x-azure-ref header' },
+    { in: 'url', match: /azurestaticapps\.net/i, confidence: 95, evidence: 'Served from azurestaticapps.net' },
+  ] },
+
+  // -------------------------------------------------------------- more CDN
+  { name: 'jsDelivr', category: 'cdn', signals: [
+    { in: 'assetUrl', match: 'cdn.jsdelivr.net', confidence: 95, evidence: 'Loads assets from jsDelivr' },
+  ] },
+  { name: 'unpkg', category: 'cdn', signals: [
+    { in: 'assetUrl', match: 'unpkg.com', confidence: 95, evidence: 'Loads assets from unpkg' },
+  ] },
+
+  // -------------------------------------------------------- more analytics
+  { name: 'Fathom', category: 'analytics', signals: [
+    { in: 'assetUrl', match: /cdn\.usefathom\.com/i, confidence: 95, evidence: 'Loads Fathom' },
+  ] },
+  { name: 'Mixpanel', category: 'analytics', signals: [
+    g('mixpanel', 90, 'window.mixpanel is defined'),
+    { in: 'assetUrl', match: /cdn\.mxpnl\.com|mixpanel/i, confidence: 95, evidence: 'Loads Mixpanel' },
+  ] },
+  { name: 'PostHog', category: 'analytics', signals: [
+    g('posthog', 90, 'window.posthog is defined'),
+    { in: 'assetUrl', match: /posthog/i, confidence: 95, evidence: 'Loads PostHog' },
+  ] },
+  { name: 'Amplitude', category: 'analytics', signals: [
+    g('amplitude', 90, 'window.amplitude is defined'),
+    { in: 'assetUrl', match: /amplitude/i, confidence: 90, evidence: 'Loads Amplitude' },
+  ] },
+  { name: 'Segment', category: 'analytics', signals: [
+    { in: 'assetUrl', match: /cdn\.segment\.(com|io)/i, confidence: 95, evidence: 'Loads Segment' },
+  ] },
+  { name: 'Heap', category: 'analytics', signals: [
+    g('heap', 90, 'window.heap is defined'),
+    { in: 'assetUrl', match: /cdn\d*\.heapanalytics\.com/i, confidence: 95, evidence: 'Loads Heap' },
+  ] },
+
+  // ------------------------------------------------------------- monitoring
+  { name: 'LogRocket', category: 'monitoring', signals: [
+    g('LogRocket', 95, 'window.LogRocket is defined'),
+    { in: 'assetUrl', match: /cdn\.lr-|logrocket/i, confidence: 95, evidence: 'Loads LogRocket' },
+  ] },
+  { name: 'Bugsnag', category: 'monitoring', signals: [
+    g('Bugsnag', 95, 'window.Bugsnag is defined'),
+    { in: 'assetUrl', match: /bugsnag/i, confidence: 95, evidence: 'Loads Bugsnag' },
+  ] },
+  { name: 'Datadog', category: 'monitoring', signals: [
+    g('DD_RUM', 95, 'window.DD_RUM is defined'),
+    g('DD_LOGS', 95, 'window.DD_LOGS is defined'),
+    { in: 'assetUrl', match: /datadoghq|datadog-rum/i, confidence: 95, evidence: 'Loads Datadog RUM' },
+  ] },
+  { name: 'New Relic', category: 'monitoring', signals: [
+    g('NREUM', 95, 'window.NREUM is defined'),
+    { in: 'assetUrl', match: /js-agent\.newrelic\.com/i, confidence: 95, evidence: 'Loads the New Relic browser agent' },
+  ] },
+  { name: 'Raygun', category: 'monitoring', signals: [
+    g('rg4js', 95, 'window.rg4js is defined'),
+    { in: 'assetUrl', match: /raygun/i, confidence: 90, evidence: 'Loads Raygun' },
+  ] },
+
+  // --------------------------------------------------------- authentication
+  { name: 'Clerk', category: 'auth', signals: [
+    g('Clerk', 95, 'window.Clerk is defined'),
+    { in: 'request', match: /clerk\.(com|dev|accounts\.dev)|\.clerk\./i, confidence: 95, evidence: 'Loads the Clerk SDK' },
+    { in: 'cookie', match: '__clerk_db_jwt', confidence: 95, evidence: 'Clerk session cookie' },
+  ] },
+  { name: 'Auth0', category: 'auth', signals: [
+    { in: 'request', match: /cdn\.auth0\.com|\.auth0\.com/i, confidence: 95, evidence: 'Loads or calls Auth0' },
+  ] },
+  { name: 'Firebase Auth', category: 'auth', implies: ['Firebase'], signals: [
+    { in: 'request', match: /identitytoolkit\.googleapis\.com|firebase-auth/i, confidence: 95, evidence: 'Calls the Firebase identity toolkit' },
+  ] },
+  { name: 'Supabase Auth', category: 'auth', implies: ['Supabase'], signals: [
+    { in: 'cookie', match: /^sb-.*-auth-token$/, confidence: 95, evidence: 'Supabase auth cookie' },
+  ] },
+  { name: 'Okta', category: 'auth', signals: [
+    g('OktaSignIn', 95, 'window.OktaSignIn is defined'),
+    { in: 'request', match: /\.okta(preview)?\.com|okta-signin/i, confidence: 95, evidence: 'Loads or calls Okta' },
+  ] },
+  { name: 'Keycloak', category: 'auth', implies: ['Java'], signals: [
+    { in: 'request', match: /\/auth\/realms\/|keycloak/i, confidence: 90, evidence: 'Talks to a Keycloak realm' },
+  ] },
+  { name: 'Stytch', category: 'auth', signals: [
+    { in: 'request', match: /stytch\.com/i, confidence: 95, evidence: 'Loads the Stytch SDK' },
+  ] },
+
+  // ---------------------------------------------------------------- payment
+  { name: 'Stripe', category: 'payment', signals: [
     g('Stripe', 90, 'window.Stripe is defined'),
     { in: 'assetUrl', match: 'js.stripe.com', confidence: 95, evidence: 'Loads Stripe.js' },
   ] },
+  { name: 'Razorpay', category: 'payment', signals: [
+    g('Razorpay', 95, 'window.Razorpay is defined'),
+    { in: 'assetUrl', match: /checkout\.razorpay\.com/i, confidence: 95, evidence: 'Loads Razorpay Checkout' },
+  ] },
+  { name: 'PayPal', category: 'payment', signals: [
+    g('paypal', 90, 'window.paypal is defined'),
+    { in: 'assetUrl', match: /paypal\.com\/sdk\/js|paypalobjects\.com/i, confidence: 95, evidence: 'Loads the PayPal SDK' },
+  ] },
+  { name: 'Paddle', category: 'payment', signals: [
+    g('Paddle', 95, 'window.Paddle is defined'),
+    { in: 'assetUrl', match: /cdn\.paddle\.com|paddle\.js/i, confidence: 95, evidence: 'Loads Paddle' },
+  ] },
+  { name: 'Lemon Squeezy', category: 'payment', signals: [
+    { in: 'assetUrl', match: /lemonsqueezy\.com/i, confidence: 95, evidence: 'Loads Lemon Squeezy' },
+  ] },
+  { name: 'Adyen', category: 'payment', signals: [
+    g('AdyenCheckout', 95, 'window.AdyenCheckout is defined'),
+    { in: 'assetUrl', match: /checkoutshopper-(live|test)\.adyen\.com/i, confidence: 95, evidence: 'Loads Adyen Checkout' },
+  ] },
+  { name: 'Braintree', category: 'payment', signals: [
+    g('braintree', 90, 'window.braintree is defined'),
+    { in: 'assetUrl', match: /js\.braintreegateway\.com/i, confidence: 95, evidence: 'Loads the Braintree SDK' },
+  ] },
+
+  // ------------------------------------------------------- database / BaaS
+  { name: 'Appwrite', category: 'database', signals: [
+    { in: 'request', match: /cloud\.appwrite\.io|appwrite/i, confidence: 90, evidence: 'Talks to Appwrite' },
+  ] },
+  { name: 'MongoDB Atlas', category: 'database', signals: [
+    { in: 'request', match: /data\.mongodb-api\.com|realm\.mongodb\.com/i, confidence: 90, evidence: 'Calls a MongoDB Atlas endpoint' },
+  ] },
+
+  // ------------------------------------------------------------------- maps
+  { name: 'Google Maps', category: 'maps', signals: [
+    { in: 'request', match: /maps\.googleapis\.com|maps\.gstatic\.com/i, confidence: 95, evidence: 'Loads the Google Maps API' },
+  ] },
+  { name: 'Leaflet', category: 'maps', signals: [
+    { in: 'assetUrl', match: /leaflet(\.min)?\.(js|css)/i, confidence: 95, evidence: 'Loads Leaflet' },
+    { in: 'html', match: /class="[^"]*\bleaflet-container\b/, confidence: 95, evidence: 'leaflet-container element' },
+  ] },
+  { name: 'Mapbox', category: 'maps', signals: [
+    g('mapboxgl', 95, 'window.mapboxgl is defined'),
+    { in: 'request', match: /api\.mapbox\.com|mapbox-gl/i, confidence: 95, evidence: 'Loads Mapbox GL' },
+  ] },
+  { name: 'OpenLayers', category: 'maps', signals: [
+    { in: 'assetUrl', match: /openlayers|\bol(\.min)?\.(js|css)/i, confidence: 90, evidence: 'Loads OpenLayers' },
+    { in: 'html', match: /class="[^"]*\bol-viewport\b/, confidence: 95, evidence: 'ol-viewport element' },
+  ] },
+
+  // --------------------------------------------------------------------- AI
+  { name: 'OpenAI', category: 'ai', signals: [
+    { in: 'request', match: /api\.openai\.com/i, confidence: 95, evidence: 'Calls the OpenAI API from the browser' },
+  ] },
+  { name: 'Anthropic', category: 'ai', signals: [
+    { in: 'request', match: /api\.anthropic\.com/i, confidence: 95, evidence: 'Calls the Anthropic API from the browser' },
+  ] },
+  { name: 'Vercel AI SDK', category: 'ai', signals: [
+    { in: 'js', match: /useChat\(|useCompletion\(|ai\/react/, confidence: 65, evidence: 'Vercel AI SDK hooks in the bundle' },
+  ] },
+
+  // ------------------------------------------------------- more fonts/icons
+  { name: 'Adobe Fonts', category: 'fonts', signals: [
+    { in: 'assetUrl', match: /use\.typekit\.net|use\.edgefonts\.net/i, confidence: 95, evidence: 'Loads Adobe Fonts' },
+  ] },
+  { name: 'Lucide', category: 'fonts', signals: [
+    { in: 'assetUrl', match: /lucide/i, confidence: 90, evidence: 'Loads Lucide icons' },
+    { in: 'html', match: /class="[^"]*\blucide\b/, confidence: 85, evidence: 'lucide icon classes' },
+  ] },
+  { name: 'Material Icons', category: 'fonts', signals: [
+    { in: 'assetUrl', match: /icon\?family=Material\+Icons|material-icons|material-symbols/i, confidence: 95, evidence: 'Loads Material Icons' },
+    { in: 'html', match: /class="[^"]*\bmaterial-(icons|symbols)/, confidence: 90, evidence: 'material-icons classes' },
+  ] },
+
+  // ------------------------------------------- signals only the new inputs see
+  //
+  // Everything below needs something the crawler did not used to collect:
+  // inline scripts, the body class list, form targets, embedded frames, the
+  // web app manifest, a registered service worker, robots.txt, or DNS.
+
+  { name: 'Progressive Web App', category: 'other', signals: [
+    { in: 'manifest', match: /"(start_url|display)"/, confidence: 95, evidence: 'Serves a Web App Manifest' },
+    { in: 'serviceWorker', match: /.+/, confidence: 90, evidence: 'Registers a service worker' },
+  ] },
+  { name: 'Workbox', category: 'library', signals: [
+    { in: 'serviceWorker', match: /workbox|sw\.js/i, confidence: 70, evidence: 'Service worker looks like Workbox' },
+    { in: 'inlineScript', match: /workbox\.(precaching|routing)/, confidence: 90, evidence: 'Workbox calls in an inline script' },
+  ] },
+
+  // Inline snippets. These are pasted into the page verbatim by the vendor's
+  // own install instructions, which makes them unusually stable signatures.
+  { name: 'Google Tag Manager', category: 'analytics', signals: [
+    { in: 'assetUrl', match: 'googletagmanager.com/gtm.js', confidence: 95, evidence: 'Loads gtm.js' },
+    { in: 'inlineScript', match: /GTM-[A-Z0-9]{4,}/, confidence: 90, evidence: 'GTM container id in an inline script' },
+    g('dataLayer', 60, 'window.dataLayer is defined'),
+  ] },
+  { name: 'Google Analytics', category: 'analytics', signals: [
+    { in: 'assetUrl', match: 'googletagmanager.com/gtag/js', confidence: 95, evidence: 'Loads gtag.js' },
+    { in: 'inlineScript', match: /G-[A-Z0-9]{8,}|UA-\d{4,}-\d+/, confidence: 90, evidence: 'Measurement id in an inline script' },
+    g('gtag', 85, 'window.gtag is defined'),
+  ] },
+  { name: 'Hotjar', category: 'analytics', signals: [
+    { in: 'assetUrl', match: 'static.hotjar.com', confidence: 95, evidence: 'Loads Hotjar' },
+    { in: 'inlineScript', match: /hjid\s*:\s*\d+/, confidence: 90, evidence: 'Hotjar site id in an inline script' },
+  ] },
+  { name: 'Intercom', category: 'other', signals: [
+    { in: 'inlineScript', match: /window\.intercomSettings/, confidence: 95, evidence: 'Intercom settings in an inline script' },
+    { in: 'request', match: /widget\.intercom\.io|api-iam\.intercom\.io/i, confidence: 95, evidence: 'Talks to Intercom' },
+  ] },
+  { name: 'Crisp', category: 'other', signals: [
+    { in: 'inlineScript', match: /\$crisp|CRISP_WEBSITE_ID/, confidence: 95, evidence: 'Crisp configuration in an inline script' },
+  ] },
+  { name: 'Cal.com', category: 'other', signals: [
+    { in: 'iframe', match: /cal\.com/i, confidence: 95, evidence: 'Embeds a Cal.com booking frame' },
+    { in: 'inlineScript', match: /Cal\(["']init/, confidence: 90, evidence: 'Cal.com embed script' },
+  ] },
+  { name: 'Calendly', category: 'other', signals: [
+    { in: 'iframe', match: /calendly\.com/i, confidence: 95, evidence: 'Embeds a Calendly frame' },
+    { in: 'request', match: /assets\.calendly\.com/i, confidence: 90, evidence: 'Loads the Calendly widget' },
+  ] },
+  { name: 'YouTube', category: 'other', signals: [
+    { in: 'iframe', match: /youtube(-nocookie)?\.com\/embed/i, confidence: 95, evidence: 'Embeds a YouTube player' },
+  ] },
+  { name: 'Vimeo', category: 'other', signals: [
+    { in: 'iframe', match: /player\.vimeo\.com/i, confidence: 95, evidence: 'Embeds a Vimeo player' },
+  ] },
+  { name: 'Typeform', category: 'other', signals: [
+    { in: 'iframe', match: /form\.typeform\.com/i, confidence: 95, evidence: 'Embeds a Typeform' },
+  ] },
+  { name: 'Mailchimp', category: 'other', signals: [
+    { in: 'formAction', match: /list-manage\.com/i, confidence: 95, evidence: 'Signup form posts to Mailchimp' },
+  ] },
+  { name: 'HubSpot', category: 'other', signals: [
+    { in: 'request', match: /js\.hs-scripts\.com|hsforms\.(net|com)/i, confidence: 95, evidence: 'Loads HubSpot' },
+    { in: 'formAction', match: /hsforms\.com/i, confidence: 90, evidence: 'Form posts to HubSpot' },
+  ] },
+  { name: 'Klaviyo', category: 'other', signals: [
+    { in: 'request', match: /static\.klaviyo\.com|a\.klaviyo\.com/i, confidence: 95, evidence: 'Loads Klaviyo' },
+  ] },
+
+  // Body classes. WordPress and its ecosystem stamp the page with what is
+  // running, which survives even when the generator meta has been stripped.
+  { name: 'WordPress', category: 'cms', implies: ['PHP'], signals: [
+    { in: 'metaGenerator', match: /WordPress ([\d.]+)/i, confidence: 98, evidence: 'generator meta names WordPress', versionFrom: true },
+    { in: 'assetUrl', match: '/wp-content/', confidence: 95, evidence: 'Loads assets from /wp-content/' },
+    { in: 'assetUrl', match: '/wp-includes/', confidence: 95, evidence: 'Loads assets from /wp-includes/' },
+    { in: 'bodyClass', match: /\bwp-(theme|singular|embed-responsive)\b/, confidence: 90, evidence: 'wp-* body classes' },
+    { in: 'cookie', match: /^wordpress_/, confidence: 90, evidence: 'wordpress_* cookie' },
+    { in: 'html', match: '/wp-json/', confidence: 80, evidence: 'Links to the WP REST API' },
+    { in: 'robots', match: /\/wp-admin\/?/, confidence: 85, evidence: 'robots.txt names /wp-admin/' },
+  ] },
+  { name: 'Elementor', category: 'ui', implies: ['WordPress'], signals: [
+    { in: 'bodyClass', match: /\belementor-page\b/, confidence: 95, evidence: 'elementor-page body class' },
+    { in: 'assetUrl', match: /\/plugins\/elementor\//i, confidence: 95, evidence: 'Loads Elementor assets' },
+  ] },
+  { name: 'Divi', category: 'ui', implies: ['WordPress'], signals: [
+    { in: 'bodyClass', match: /\bet_pb_/, confidence: 90, evidence: 'Divi builder body classes' },
+    { in: 'assetUrl', match: /\/themes\/Divi\//i, confidence: 95, evidence: 'Loads the Divi theme' },
+  ] },
+  { name: 'Yoast SEO', category: 'other', implies: ['WordPress'], signals: [
+    { in: 'html', match: /<!-- This site is optimized with the Yoast SEO plugin/i, confidence: 98, evidence: 'Yoast SEO comment block' },
+  ] },
+
+  // Meta tags beyond the generator.
+  { name: 'Open Graph', category: 'other', signals: [
+    { in: 'meta', match: /^og:(title|image|type)=/m, confidence: 90, evidence: 'Open Graph meta tags' },
+  ] },
+  { name: 'Vercel Analytics', category: 'analytics', implies: ['Vercel'], signals: [
+    { in: 'request', match: /\/_vercel\/insights|vitals\.vercel-insights\.com/i, confidence: 95, evidence: 'Reports to Vercel Analytics' },
+  ] },
+
+  // DNS. The last resort, and sometimes the only one: a site behind a proxy
+  // strips every header that would name its host, but the CNAME still points
+  // straight at the platform.
+  { name: 'Vercel', category: 'hosting', signals: [
+    { in: 'header', header: 'server', match: /Vercel/i, confidence: 98, evidence: 'server: Vercel' },
+    { in: 'header', header: 'x-vercel-id', match: /.+/, confidence: 98, evidence: 'x-vercel-id header' },
+    { in: 'dns', match: /vercel-dns\.com|vercel-dns-\d/i, confidence: 95, evidence: 'DNS points at Vercel' },
+  ] },
+  { name: 'Netlify', category: 'hosting', signals: [
+    { in: 'header', header: 'server', match: /Netlify/i, confidence: 98, evidence: 'server: Netlify' },
+    { in: 'header', header: 'x-nf-request-id', match: /.+/, confidence: 98, evidence: 'x-nf-request-id header' },
+    { in: 'dns', match: /netlify\.(com|app)/i, confidence: 95, evidence: 'DNS points at Netlify' },
+  ] },
+  { name: 'Cloudflare', category: 'cdn', signals: [
+    { in: 'header', header: 'cf-ray', match: /.+/, confidence: 98, evidence: 'cf-ray header' },
+    { in: 'header', header: 'server', match: /cloudflare/i, confidence: 95, evidence: 'server: cloudflare' },
+    { in: 'dns', match: /NS .*\.ns\.cloudflare\.com/i, confidence: 90, evidence: 'Cloudflare nameservers' },
+  ] },
+  { name: 'GitHub Pages', category: 'hosting', signals: [
+    { in: 'header', header: 'server', match: /GitHub\.com/i, confidence: 95, evidence: 'server: GitHub.com' },
+    { in: 'dns', match: /github\.io/i, confidence: 90, evidence: 'DNS points at github.io' },
+  ] },
+  { name: 'Shopify', category: 'ecommerce', signals: [
+    g('Shopify', 98, 'window.Shopify is defined'),
+    { in: 'assetUrl', match: 'cdn.shopify.com', confidence: 95, evidence: 'Loads assets from cdn.shopify.com' },
+    { in: 'header', header: 'x-shopid', match: /.+/, confidence: 98, evidence: 'x-shopid header' },
+    { in: 'dns', match: /shops\.myshopify\.com|shopify\.com/i, confidence: 90, evidence: 'DNS points at Shopify' },
+  ] },
+  { name: 'Google Workspace', category: 'other', signals: [
+    { in: 'dns', match: /MX .*(aspmx\.l\.google\.com|googlemail\.com)/i, confidence: 90, evidence: 'Google Workspace mail records' },
+  ] },
+  { name: 'Microsoft 365', category: 'other', signals: [
+    { in: 'dns', match: /MX .*mail\.protection\.outlook\.com/i, confidence: 90, evidence: 'Microsoft 365 mail records' },
+  ] },
 ];
+
+/**
+ * Rules are authored in category sections, and a technology can legitimately
+ * appear in more than one — a later section adding signals the earlier one had
+ * no input for, like WordPress gaining a `robots.txt` and a body-class signal
+ * once the crawler started collecting them.
+ *
+ * Merging rather than letting the last definition win matters: `detect` keys
+ * results by name, so without this the second WordPress entry would silently
+ * replace the first and throw away every signal it held.
+ */
+function mergeByName(rules: Rule[]): Rule[] {
+  const merged = new Map<string, Rule>();
+
+  for (const rule of rules) {
+    const existing = merged.get(rule.name);
+    if (!existing) {
+      merged.set(rule.name, { ...rule, signals: [...rule.signals], implies: rule.implies ?? [] });
+      continue;
+    }
+
+    // Identical signals across sections are harmless but would show the user
+    // the same sentence twice, so drop the repeats.
+    const seen = new Set(existing.signals.map(signalKey));
+    for (const signal of rule.signals) {
+      if (!seen.has(signalKey(signal))) {
+        existing.signals.push(signal);
+        seen.add(signalKey(signal));
+      }
+    }
+    existing.implies = [...new Set([...(existing.implies ?? []), ...(rule.implies ?? [])])];
+  }
+
+  return [...merged.values()];
+}
+
+function signalKey(s: Signal): string {
+  return `${s.in}|${s.header ?? ''}|${String(s.match)}|${s.confidence}`;
+}
+
+export const RULES: Rule[] = mergeByName(RAW_RULES);

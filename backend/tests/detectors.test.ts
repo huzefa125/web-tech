@@ -15,6 +15,7 @@ function input(over: Partial<DetectionInput> = {}): DetectionInput {
     html: '<!doctype html><html><head></head><body></body></html>',
     headers: {},
     assetUrls: [],
+    requestUrls: [],
     globals: [],
     cookies: [],
     css: '',
@@ -344,11 +345,264 @@ describe('backend detection from cookies', () => {
   });
 
   it('detects headless CMS and BaaS from the endpoints a page calls', () => {
-    expect(names(input({ assetUrls: ['https://cdn.sanity.io/images/x/y.jpg'] }))).toContain('Sanity');
-    expect(names(input({ assetUrls: ['https://images.ctfassets.net/x/y.png'] }))).toContain(
+    expect(names(input({ requestUrls: ['https://cdn.sanity.io/images/x/y.jpg'] }))).toContain('Sanity');
+    expect(names(input({ requestUrls: ['https://images.ctfassets.net/x/y.png'] }))).toContain(
       'Contentful',
     );
-    expect(names(input({ assetUrls: ['https://abc.supabase.co/rest/v1/x'] }))).toContain('Supabase');
+    expect(names(input({ requestUrls: ['https://abc.supabase.co/rest/v1/x'] }))).toContain('Supabase');
+  });
+});
+
+describe('the second rule expansion', () => {
+  it('detects the newer client frameworks from their own markers', () => {
+    expect(names(input({ html: '<div q:container="paused" q:base="/build/">' }))).toContain('Qwik');
+    expect(names(input({ html: '<body data-sveltekit-preload-data="hover">' }))).toEqual(
+      expect.arrayContaining(['SvelteKit', 'Svelte']),
+    );
+    expect(names(input({ globals: ['__PREACT_DEVTOOLS__'] }))).toContain('Preact');
+    expect(names(input({ globals: ['litElementVersions'] }))).toContain('Lit');
+    expect(names(input({ globals: ['_$HY'] }))).toContain('SolidJS');
+    expect(names(input({ assetUrls: ['https://x.com/_frsh/js/start.js'] }))).toEqual(
+      expect.arrayContaining(['Fresh', 'Deno']),
+    );
+  });
+
+  it('detects server frameworks from their session cookies', () => {
+    expect(names(input({ cookies: ['ci_session'] }))).toEqual(
+      expect.arrayContaining(['CodeIgniter', 'PHP']),
+    );
+    expect(names(input({ cookies: ['CAKEPHP'] }))).toContain('CakePHP');
+    expect(names(input({ cookies: ['adonis-session'] }))).toEqual(
+      expect.arrayContaining(['AdonisJS', 'Node.js']),
+    );
+    expect(names(input({ headers: { 'x-application-context': 'app:prod' } }))).toEqual(
+      expect.arrayContaining(['Spring Boot', 'Java']),
+    );
+  });
+
+  it('detects headless CMS from the asset domains they serve from', () => {
+    expect(names(input({ requestUrls: ['https://media.graphassets.com/x'] }))).toContain('Hygraph');
+    expect(names(input({ requestUrls: ['https://www.datocms-assets.com/x.png'] }))).toContain(
+      'DatoCMS',
+    );
+    expect(names(input({ requestUrls: ['https://a.storyblok.com/f/1/x.jpg'] }))).toContain(
+      'Storyblok',
+    );
+    expect(names(input({ cookies: ['CraftSessionId'] }))).toEqual(
+      expect.arrayContaining(['Craft CMS', 'PHP']),
+    );
+  });
+
+  it('detects the UI kits the screenshot showed', () => {
+    // Radix leaves data attributes on every primitive it renders.
+    expect(names(input({ html: '<div data-radix-popper-content-wrapper>' }))).toContain('Radix UI');
+    // shadcn is copy-pasted source, so it is inferred from what it sits on.
+    const shadcn = detect(input({ html: '<button data-slot="button">Go</button>' }));
+    expect(shadcn.map((d) => d.name)).toEqual(
+      expect.arrayContaining(['shadcn/ui', 'Radix UI', 'Tailwind CSS']),
+    );
+    expect(names(input({ html: '<div class="ant-btn ant-btn-primary">' }))).toContain('Ant Design');
+    expect(names(input({ html: '<div class="mantine-Button-root">' }))).toContain('Mantine');
+    expect(names(input({ html: '<div class="v-application">' }))).toEqual(
+      expect.arrayContaining(['Vuetify', 'Vue.js']),
+    );
+  });
+
+  it('detects auth providers', () => {
+    expect(names(input({ globals: ['Clerk'] }))).toContain('Clerk');
+    expect(names(input({ requestUrls: ['https://cdn.auth0.com/js/auth0.min.js'] }))).toContain(
+      'Auth0',
+    );
+    expect(names(input({ requestUrls: ['https://x.com/auth/realms/master/x.js'] }))).toEqual(
+      expect.arrayContaining(['Keycloak', 'Java']),
+    );
+  });
+
+  it('detects payment providers', () => {
+    expect(names(input({ globals: ['Razorpay'] }))).toContain('Razorpay');
+    expect(names(input({ assetUrls: ['https://www.paypal.com/sdk/js?client-id=x'] }))).toContain(
+      'PayPal',
+    );
+    expect(names(input({ globals: ['AdyenCheckout'] }))).toContain('Adyen');
+
+    // Stripe moved out of "other" once payments became a category of its own.
+    expect(find(input({ globals: ['Stripe'] }), 'Stripe')?.category).toBe('payment');
+  });
+
+  it('detects monitoring separately from analytics', () => {
+    expect(find(input({ globals: ['LogRocket'] }), 'LogRocket')?.category).toBe('monitoring');
+    expect(find(input({ globals: ['NREUM'] }), 'New Relic')?.category).toBe('monitoring');
+    expect(find(input({ globals: ['DD_RUM'] }), 'Datadog')?.category).toBe('monitoring');
+    // Sentry moved with them.
+    expect(find(input({ globals: ['Sentry'] }), 'Sentry')?.category).toBe('monitoring');
+    // …while product analytics stayed put.
+    expect(find(input({ globals: ['posthog'] }), 'PostHog')?.category).toBe('analytics');
+  });
+
+  it('detects maps', () => {
+    expect(names(input({ requestUrls: ['https://maps.googleapis.com/maps/api/js'] }))).toContain(
+      'Google Maps',
+    );
+    expect(names(input({ html: '<div class="leaflet-container">' }))).toContain('Leaflet');
+    expect(names(input({ globals: ['mapboxgl'] }))).toContain('Mapbox');
+  });
+
+  it('detects browser-side AI calls', () => {
+    expect(names(input({ requestUrls: ['https://api.anthropic.com/v1/messages'] }))).toContain(
+      'Anthropic',
+    );
+    expect(names(input({ requestUrls: ['https://api.openai.com/v1/chat'] }))).toContain('OpenAI');
+  });
+
+  it('puts build tools in their own category', () => {
+    expect(find(input({ globals: ['__webpack_require__'] }), 'webpack')?.category).toBe('build');
+    expect(find(input({ globals: ['parcelRequire'] }), 'Parcel')?.category).toBe('build');
+  });
+
+  it('detects hosting from platform request-id headers', () => {
+    expect(names(input({ headers: { 'x-railway-request-id': 'abc' } }))).toContain('Railway');
+    expect(names(input({ headers: { 'fly-request-id': 'abc' } }))).toContain('Fly.io');
+  });
+
+  it('detects the public package CDNs', () => {
+    expect(names(input({ assetUrls: ['https://cdn.jsdelivr.net/npm/x@1/x.js'] }))).toContain(
+      'jsDelivr',
+    );
+    expect(names(input({ assetUrls: ['https://unpkg.com/x@1/x.js'] }))).toContain('unpkg');
+  });
+});
+
+describe('assetUrl and request are different channels', () => {
+  // These two lists come from different places in the crawler. `assetUrls`
+  // holds only the stylesheets and scripts whose bodies were stored;
+  // `requestUrls` holds every URL the page touched. A service reached over
+  // fetch appears only in the second, so a rule keyed on the first can never
+  // fire in production — which is exactly what happened, silently, while the
+  // fixtures put API hosts in `assetUrls` and the tests stayed green.
+
+  it('finds a service integration in requestUrls, not in assetUrls', () => {
+    const url = 'https://abc.supabase.co/rest/v1/posts';
+    expect(names(input({ requestUrls: [url] }))).toContain('Supabase');
+    expect(names(input({ assetUrls: [url] }))).not.toContain('Supabase');
+  });
+
+  it('keeps bundle-path rules on assetUrls', () => {
+    // These really are stylesheets and scripts, and stay where they are.
+    expect(names(input({ assetUrls: ['https://x.com/_next/static/a.js'] }))).toContain('Next.js');
+    expect(names(input({ assetUrls: ['https://x.com/_astro/a.js'] }))).toContain('Astro');
+  });
+
+  it.each([
+    ['https://api.openai.com/v1/chat', 'OpenAI'],
+    ['https://api.anthropic.com/v1/messages', 'Anthropic'],
+    ['https://maps.googleapis.com/maps/api/js', 'Google Maps'],
+    ['https://api.mapbox.com/styles/v1', 'Mapbox'],
+    ['https://identitytoolkit.googleapis.com/v1/accounts', 'Firebase Auth'],
+    ['https://data.mongodb-api.com/app/x/endpoint', 'MongoDB Atlas'],
+    ['https://cdn.sanity.io/images/x/y.jpg', 'Sanity'],
+    ['https://x.auth0.com/authorize', 'Auth0'],
+  ])('detects %s as %s from a request', (url, expected) => {
+    expect(names(input({ requestUrls: [url] }))).toContain(expected);
+  });
+});
+
+describe('signals that need the document pulled apart', () => {
+  it('reads inline scripts separately from the surrounding markup', () => {
+    // The vendor's own install snippet is pasted verbatim into thousands of
+    // sites, which makes it an unusually stable signature.
+    expect(
+      names(input({ html: '<html><body><script>window.dataLayer=[];GTM-ABCD1234</script></body></html>' })),
+    ).toContain('Google Tag Manager');
+
+    expect(
+      names(input({ html: '<script>window.intercomSettings={app_id:"x"}</script>' })),
+    ).toContain('Intercom');
+  });
+
+  it('does not mistake page text for an inline script', () => {
+    // The same characters sitting in visible copy must not fire the rule.
+    expect(names(input({ html: '<body><p>window.intercomSettings</p></body>' }))).not.toContain(
+      'Intercom',
+    );
+  });
+
+  it('reads the body class list', () => {
+    const found = names(input({ html: '<body class="home page elementor-page wp-singular">' }));
+    expect(found).toEqual(expect.arrayContaining(['Elementor', 'WordPress', 'PHP']));
+  });
+
+  it('reads form targets', () => {
+    expect(
+      names(input({ html: '<form action="https://x.us1.list-manage.com/subscribe/post">' })),
+    ).toContain('Mailchimp');
+  });
+
+  it('reads embedded frames', () => {
+    expect(
+      names(input({ html: '<iframe src="https://www.youtube.com/embed/abc"></iframe>' })),
+    ).toContain('YouTube');
+    expect(names(input({ html: '<iframe src="https://cal.com/x"></iframe>' }))).toContain('Cal.com');
+  });
+
+  it('reads meta tags beyond the generator', () => {
+    expect(
+      names(input({ html: '<meta property="og:title" content="Hi"><meta property="og:image" content="x">' })),
+    ).toContain('Open Graph');
+  });
+
+  it('reads the manifest and the service worker', () => {
+    expect(
+      names(input({ manifest: '{"start_url":"/","display":"standalone"}' })),
+    ).toContain('Progressive Web App');
+    expect(names(input({ serviceWorkers: ['https://x.com/sw.js'] }))).toContain(
+      'Progressive Web App',
+    );
+  });
+
+  it('reads robots.txt', () => {
+    const found = names(input({ robots: 'User-agent: *\nDisallow: /wp-admin/\n' }));
+    expect(found).toEqual(expect.arrayContaining(['WordPress', 'PHP']));
+  });
+
+  it('reads DNS records when the headers give nothing away', () => {
+    // A site behind a proxy strips the headers that would name its host, but
+    // the CNAME still points straight at the platform.
+    expect(names(input({ dns: ['CNAME cname.vercel-dns.com'] }))).toContain('Vercel');
+    expect(names(input({ dns: ['NS kate.ns.cloudflare.com'] }))).toContain('Cloudflare');
+    expect(names(input({ dns: ['MX aspmx.l.google.com'] }))).toContain('Google Workspace');
+    expect(names(input({ dns: ['MX x-com.mail.protection.outlook.com'] }))).toContain(
+      'Microsoft 365',
+    );
+  });
+
+  it('treats the optional inputs as absent rather than empty', () => {
+    // Old scans predate these fields entirely. A rule keyed on one must simply
+    // not fire, never throw.
+    expect(() => detect(input())).not.toThrow();
+    expect(names(input())).toEqual([]);
+  });
+});
+
+describe('rules merged across sections', () => {
+  it('keeps every signal when a technology is defined more than once', () => {
+    // WordPress is authored twice: once under CMS, once again where the
+    // robots.txt and body-class inputs are introduced. Both sets must count.
+    expect(names(input({ assetUrls: ['https://x.com/wp-content/x.css'] }))).toContain('WordPress');
+    expect(names(input({ robots: 'Disallow: /wp-admin/' }))).toContain('WordPress');
+    expect(names(input({ html: '<body class="wp-singular">' }))).toContain('WordPress');
+  });
+
+  it('does not repeat the same evidence sentence twice', () => {
+    const wp = find(
+      input({
+        html: '<meta name="generator" content="WordPress 6.4.3"><body class="wp-singular">',
+        assetUrls: ['https://x.com/wp-content/x.css'],
+        robots: 'Disallow: /wp-admin/',
+      }),
+      'WordPress',
+    );
+    expect(wp?.evidence.length).toBe(new Set(wp?.evidence).size);
+    expect(wp?.version).toBe('6.4.3');
   });
 });
 

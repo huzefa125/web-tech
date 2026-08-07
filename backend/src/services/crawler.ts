@@ -12,7 +12,7 @@
  * cheap and give each scan its own cookie jar and cache.
  */
 
-import { chromium, type Browser, type BrowserContext, type Response } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
 
 import { env } from '../config/env.js';
 import type { AssetKind } from '../db/schema/scans.js';
@@ -38,6 +38,19 @@ export interface CrawlResult {
   html: Buffer;
   assets: CapturedAsset[];
   screenshot: { body: Buffer; width: number; height: number };
+  /**
+   * Every URL the page requested, of any kind — XHR, fetch, images, fonts,
+   * iframes, beacons. `assets` covers only the stylesheets and scripts whose
+   * bodies were stored; a page talking to `api.openai.com` or `*.supabase.co`
+   * does so over fetch, and that never appears in `assets`.
+   */
+  requestUrls: string[];
+  /** Body of the Web App Manifest, if the page declared one. */
+  manifest: string | null;
+  /** Script URLs of any service workers the page registered. */
+  serviceWorkers: string[];
+  /** Body of /robots.txt, truncated. Names crawlers, admin paths and sitemaps. */
+  robots: string | null;
   /** Globals present on `window` — the strongest signals module 2 has. */
   globals: string[];
   /**
@@ -114,6 +127,46 @@ const PROBE_GLOBALS = [
   'tsParticles',
   'VANTA',
   'barba',
+  'BABYLON',
+  'PIXI',
+  'Matter',
+
+  // Frameworks that only announce themselves on window.
+  '_$HY',
+  '__PREACT_DEVTOOLS__',
+  'litElementVersions',
+  'litHtmlVersions',
+  'Stimulus',
+  'Ember',
+  'Backbone',
+  'Inferno',
+  '$MARKO',
+  'Phoenix',
+  'parcelRequire',
+
+  // Storefronts, auth, payments, maps and monitoring SDKs. All of these attach
+  // a global on load, which is usually cheaper and more certain than matching
+  // their CDN URL — a site may self-host the same bundle.
+  'Ecwid',
+  'Snipcart',
+  'Clerk',
+  'OktaSignIn',
+  'Razorpay',
+  'paypal',
+  'Paddle',
+  'AdyenCheckout',
+  'braintree',
+  'mapboxgl',
+  'LogRocket',
+  'Bugsnag',
+  'DD_RUM',
+  'DD_LOGS',
+  'NREUM',
+  'rg4js',
+  'mixpanel',
+  'posthog',
+  'amplitude',
+  'heap',
 ] as const;
 
 let browser: Browser | null = null;
@@ -135,6 +188,44 @@ export async function getBrowser(): Promise<Browser> {
 export async function closeBrowser(): Promise<void> {
   await browser?.close();
   browser = null;
+}
+
+/** `<link rel="manifest" href="...">`, without paying for a full parse. */
+function manifestHref(html: string): string | null {
+  const m = /<link[^>]+rel=["']?manifest["']?[^>]*>/i.exec(html);
+  if (!m) return null;
+  const href = /href=["']([^"']+)["']/i.exec(m[0]);
+  return href?.[1] ?? null;
+}
+
+/** Longest supporting document we will keep. Manifests and robots.txt are
+ *  small; anything larger is a misconfigured route, not a manifest. */
+const MAX_SUPPORTING_BYTES = 64 * 1024;
+
+/**
+ * Fetch a same-origin supporting file from inside the page.
+ *
+ * Deliberately goes through `page.evaluate` rather than undici: the request
+ * then carries the page's own origin and cookies, so a site that varies its
+ * robots.txt by session sees one visitor, not two. Best-effort throughout —
+ * a missing manifest is the normal case, not an error.
+ */
+async function fetchText(page: Page, path: string | null, base: string): Promise<string | null> {
+  if (!path) return null;
+
+  try {
+    const url = new URL(path, base).toString();
+    const text = await page.evaluate(async (target: string) => {
+      const res = await fetch(target, { credentials: 'same-origin' });
+      if (!res.ok) return null;
+      return res.text();
+    }, url);
+
+    if (typeof text !== 'string') return null;
+    return text.length > MAX_SUPPORTING_BYTES ? text.slice(0, MAX_SUPPORTING_BYTES) : text;
+  } catch {
+    return null;
+  }
 }
 
 function assetKindFor(resourceType: string, contentType: string | null): AssetKind | null {
@@ -170,6 +261,7 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
   const assets: CapturedAsset[] = [];
   const warnings: string[] = [];
   const seen = new Set<string>();
+  const requested = new Set<string>();
 
   try {
     context = await browser.newContext({
@@ -191,7 +283,14 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
       void (async () => {
         try {
           const url = response.url();
-          if (seen.has(url) || !url.startsWith('http')) return;
+          if (!url.startsWith('http')) return;
+
+          // Record the URL before deciding whether to store a body. An API call
+          // has no body worth keeping, but the fact that it happened is often
+          // the only evidence a backend service is in play at all.
+          if (requested.size < env.CRAWLER_MAX_REQUEST_URLS) requested.add(url);
+
+          if (seen.has(url)) return;
 
           const contentType = response.headers()['content-type'] ?? null;
           const kind = assetKindFor(response.request().resourceType(), contentType);
@@ -216,8 +315,12 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
     const startedAt = Date.now();
     let response: Response | null;
     try {
+      // `domcontentloaded`, not `networkidle`. A site with analytics polling, a
+      // websocket, or a chat widget never reaches network idle at all — the
+      // whole 30s budget burns and a perfectly scannable page is reported as
+      // "did not finish loading". Playwright's own docs advise against it.
       response = await page.goto(target.url, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: env.CRAWLER_NAV_TIMEOUT_MS,
       });
     } catch (err) {
@@ -233,11 +336,22 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
       }
       throw new AppError(400, 'VALIDATION_ERROR', `Could not load ${target.host}: ${message}`);
     }
-    const loadTimeMs = Date.now() - startedAt;
-
     if (!response) {
       throw new AppError(400, 'VALIDATION_ERROR', `${target.host} returned no response`);
     }
+
+    // Give the page a bounded window to finish fetching its stylesheets, run
+    // its framework, and render. Best-effort on purpose: whichever of these
+    // resolves first is enough, and neither timing out is a failure — we scan
+    // whatever the page managed in the time it had.
+    await Promise.race([
+      page.waitForLoadState('networkidle', { timeout: env.CRAWLER_SETTLE_MS }),
+      page.waitForLoadState('load', { timeout: env.CRAWLER_SETTLE_MS }),
+    ]).catch(() => {
+      warnings.push('Page was still loading when it was captured');
+    });
+
+    const loadTimeMs = Date.now() - startedAt;
 
     const html = Buffer.from(await page.content(), 'utf8');
 
@@ -276,6 +390,29 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
       logger.debug({ err }, 'cookie read failed');
     }
 
+    // Service workers are registered by script, so the page has to be asked —
+    // there is no response to observe. A page with none returns an empty list.
+    let serviceWorkers: string[] = [];
+    try {
+      serviceWorkers = await page.evaluate(async () => {
+        const nav = (globalThis as { navigator?: { serviceWorker?: unknown } }).navigator;
+        const sw = nav?.serviceWorker as
+          | { getRegistrations?: () => Promise<{ active?: { scriptURL?: string } }[]> }
+          | undefined;
+        if (!sw?.getRegistrations) return [];
+        const regs = await sw.getRegistrations();
+        return regs.map((r) => r.active?.scriptURL ?? '').filter(Boolean);
+      });
+    } catch {
+      // Insecure origin, or the page navigated away. Not worth a warning.
+    }
+
+    // The manifest and robots.txt are fetched through the page's own context,
+    // so they inherit its cookies and origin rather than being a second,
+    // unauthenticated visitor to the site.
+    const manifest = await fetchText(page, manifestHref(await page.content()), target.url);
+    const robots = await fetchText(page, '/robots.txt', target.url);
+
     const screenshot = await page.screenshot({ type: 'png', fullPage: false });
 
     if (seen.size > assets.length) {
@@ -297,6 +434,10 @@ export async function crawlTarget(target: ScanTarget): Promise<CrawlResult> {
         width: env.CRAWLER_VIEWPORT_WIDTH,
         height: env.CRAWLER_VIEWPORT_HEIGHT,
       },
+      requestUrls: [...requested],
+      manifest,
+      serviceWorkers,
+      robots,
       globals,
       cookies,
       warnings,

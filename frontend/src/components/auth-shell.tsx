@@ -1,8 +1,7 @@
+import { Radar } from 'lucide-react';
 import Link from 'next/link';
 
-import { Spotlight } from '@/components/ui/spotlight-new';
-
-/** Shared frame for the auth pages: one spotlight canvas, one card. */
+/** Shared frame for the auth pages: one ruled backdrop, one card. */
 export function AuthShell({
   title,
   subtitle,
@@ -15,19 +14,20 @@ export function AuthShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="relative flex min-h-svh w-full items-center justify-center overflow-hidden px-4 py-12">
-      <Spotlight />
+    <main className="relative flex min-h-svh w-full items-center justify-center px-4 py-12">
+      <div className="surface-grid pointer-events-none absolute inset-x-0 top-0 h-96" aria-hidden />
 
-      <div className="relative z-10 w-full max-w-sm">
+      <div className="relative w-full max-w-sm">
         <Link
           href="/"
-          className="text-muted-foreground hover:text-foreground mb-8 block text-center text-sm transition-colors"
+          className="text-muted-foreground hover:text-foreground mb-8 flex items-center justify-center gap-2 text-sm font-medium transition-colors"
         >
+          <Radar className="text-primary size-4" aria-hidden />
           Internet Intelligence
         </Link>
 
-        <div className="border-border/60 bg-card/60 rounded-xl border p-6 backdrop-blur-xl">
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <div className="border-border bg-card rounded-xl border p-6 shadow-sm">
+          <h1 className="text-xl font-semibold">{title}</h1>
           {subtitle ? <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p> : null}
           <div className="mt-6">{children}</div>
         </div>

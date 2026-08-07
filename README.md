@@ -19,11 +19,11 @@ Auth spec: [auth-requirements.md](auth-requirements.md)
 |---|---|
 | **Auth** — email/password, Google & GitHub OAuth, JWT sessions, rotating refresh tokens | ✅ Built |
 | **Module 1 — Website Crawler** — Playwright captures HTML, CSS, JS and a screenshot | ✅ Built |
-| **Module 2 — Technology Detector** — 102 rules across 13 categories | ✅ Built |
+| **Module 2 — Technology Detector** — 213 rules, 19 signal kinds, 19 categories | ✅ Built |
 | Modules 3–4 — Hosting & CDN detection | ✅ Folded into module 2 |
 | Modules 5–30 — DNS, SSL, security, performance, SEO, AI analysis, … | ⬜ Not started |
 
-279 tests, all passing.
+313 tests, all passing.
 
 ---
 
@@ -100,7 +100,9 @@ UI polls.
 
 2. **The worker crawls.** One Chromium is shared process-wide; each scan gets a
    fresh incognito context, so scans cannot see each other's cookies or cache.
-   Navigation waits for `networkidle`. As responses arrive, CSS and JS bodies
+   Navigation waits for DOMContentLoaded, then allows a bounded settle window —
+   waiting for true network idle means a site with analytics polling or a
+   websocket never finishes at all. As responses arrive, CSS and JS bodies
    are collected — read at response time rather than re-fetched, so what is
    stored is exactly what the page received.
 
@@ -128,14 +130,16 @@ fixtures instead of against live sites that redesign under the test, and it
 means a new rule can eventually be replayed over old scans to answer "when did
 this site start using X?" without re-crawling.
 
-### Six signal kinds
+### Signal kinds
 
 | Signal | Looks at | Example |
 |---|---|---|
 | `global` | Names on `window` | `__NEXT_DATA__` → Next.js |
 | `cookie` | Cookie **names** | `PHPSESSID` → PHP |
 | `header` | One response header | `cf-ray` → Cloudflare |
-| `assetUrl` | URLs of loaded CSS/JS | `/_astro/` → Astro |
+| `assetUrl` | URLs of the CSS/JS whose bodies were stored | `/_astro/` → Astro |
+| `request` | **Every** URL the page touched, fetch and XHR included | `api.openai.com` → OpenAI |
+| `metaGenerator` | `<meta name="generator">` | `WordPress 6.4.3` → WordPress + version |
 | `html` / `css` / `js` | Captured bodies | `--tw-ring-offset-shadow` → Tailwind |
 | `url` | The final URL | `/default.aspx` → ASP.NET |
 
@@ -169,11 +173,12 @@ WooCommerce ──► WordPress ──► PHP
 Vanta.js ──► Three.js
 ```
 
-### Coverage (102 rules)
+### Coverage (213 rules)
 
-Frameworks · static site generators · CMS · ecommerce · UI kits ·
-**animation & 3D** · libraries · languages & runtimes · web servers · hosting ·
-CDN · analytics · fonts
+Frameworks · static site generators · CMS & headless content · ecommerce ·
+UI kits · animation & 3D · libraries · build tools · languages & runtimes ·
+web servers · hosting · CDN · database & BaaS · authentication · payments ·
+product analytics · monitoring · maps · AI · fonts & icons
 
 Backend detection leans hardest on **cookie names**. A CDN routinely strips
 `Server` and `X-Powered-By`, but a session cookie has to reach the browser or
@@ -291,8 +296,10 @@ The ones worth knowing:
 | `SCAN_QUEUE_DRIVER` | `redis` | `inline` runs the crawl in the API process — no retries, no durability, no backpressure. Refuses to boot under `NODE_ENV=production`. |
 | `STORAGE_DRIVER` | `local` | `r2` is **not implemented yet** and throws on startup rather than silently writing to an ephemeral container disk |
 | `FREE_SCANS_PER_DAY` | `5` | Free tier cap. Failed scans count — otherwise the limit is evaded by scanning addresses that always fail |
-| `CRAWLER_NAV_TIMEOUT_MS` | `30000` | |
+| `CRAWLER_NAV_TIMEOUT_MS` | `30000` | Budget to reach DOMContentLoaded |
+| `CRAWLER_SETTLE_MS` | `6000` | Extra time to finish rendering afterwards. Bounded on purpose — waiting for true network idle means a site with analytics polling never finishes |
 | `CRAWLER_MAX_ASSETS` | `50` | Some sites ship hundreds of files |
+| `CRAWLER_MAX_REQUEST_URLS` | `400` | URLs only, no bodies — but an infinite-scroll page firing XHR on a timer would grow it without bound |
 | `RATE_LIMIT_ENABLED` | `true` | Needs Redis |
 
 ---
@@ -345,7 +352,7 @@ backend/
       scan-service.ts       Scan lifecycle
       auth-service.ts       token-service.ts  oauth-service.ts
     queue/  workers/        BullMQ producer and consumer
-  tests/                    15 files, 279 tests
+  tests/                    15 files, 313 tests
 frontend/
   src/app/(auth)/           login · signup · verify · forgot · reset
   src/app/(dashboard)/      dashboard · scans/[id]
@@ -359,7 +366,7 @@ frontend/
 
 ```bash
 cd backend
-npm test              # 279 tests
+npm test              # 313 tests
 npm run test:coverage
 ```
 

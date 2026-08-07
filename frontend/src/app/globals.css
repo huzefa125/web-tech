@@ -48,54 +48,93 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/**
+ * White and gray, with one quiet accent.
+ *
+ * The page is mostly other people's logos — every detected technology renders
+ * its own brand mark in its own colour. So the chrome deliberately stays
+ * near-monochrome: a saturated interface would fight the content it exists to
+ * present. The greys carry a slight cool cast (hue 264) rather than being flat
+ * neutral, which reads as chosen instead of defaulted.
+ *
+ * The ground is a light grey and cards are pure white, not the other way
+ * round. White-on-white needs a heavy border to separate anything; this way
+ * cards lift off the page on their own and the borders can stay hairline.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.981 0.002 264);
+  --foreground: oklch(0.21 0.012 264);
+
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.012 264);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.21 0.012 264);
+
+  /* Deep slate-blue. Dark enough to carry white text, quiet enough that a
+     Shopify green or a Vercel black still reads as the loudest thing around. */
+  --primary: oklch(0.42 0.075 259);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.958 0.003 264);
+  --secondary-foreground: oklch(0.29 0.014 264);
+
+  --muted: oklch(0.962 0.003 264);
+  /* 0.52 is the point where grey-on-light-grey still clears 4.5:1. */
+  --muted-foreground: oklch(0.52 0.014 264);
+
+  --accent: oklch(0.955 0.006 259);
+  --accent-foreground: oklch(0.31 0.05 259);
+
+  --destructive: oklch(0.55 0.2 25);
+
+  --border: oklch(0.915 0.004 264);
+  --input: oklch(0.9 0.005 264);
+  --ring: oklch(0.42 0.075 259);
+
+  --chart-1: oklch(0.42 0.075 259);
+  --chart-2: oklch(0.55 0.05 259);
+  --chart-3: oklch(0.66 0.035 264);
+  --chart-4: oklch(0.78 0.02 264);
+  --chart-5: oklch(0.88 0.01 264);
+
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.21 0.012 264);
+  --sidebar-primary: oklch(0.42 0.075 259);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.962 0.003 264);
+  --sidebar-accent-foreground: oklch(0.29 0.014 264);
+  --sidebar-border: oklch(0.915 0.004 264);
+  --sidebar-ring: oklch(0.42 0.075 259);
+
+  /* Confidence bands. Semantic, and separate from the accent — they mean
+     something, so they must not be mistaken for brand colour. Darkened for a
+     light ground: the 400-weight versions these replaced were unreadable. */
+  --confidence-confirmed: oklch(0.52 0.13 155);
+  --confidence-likely: oklch(0.52 0.12 245);
+  --confidence-possible: oklch(0.58 0.13 70);
 }
 
+/* Kept working, though nothing switches to it today — the app ships light.
+   Same hue cast, inverted lightness, with the confidence bands lifted rather
+   than naively inverted so they stay legible on a dark ground. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --background: oklch(0.17 0.008 264);
+  --foreground: oklch(0.96 0.003 264);
+  --card: oklch(0.215 0.009 264);
+  --card-foreground: oklch(0.96 0.003 264);
+  --popover: oklch(0.215 0.009 264);
+  --popover-foreground: oklch(0.96 0.003 264);
+  --primary: oklch(0.92 0.01 264);
+  --primary-foreground: oklch(0.21 0.012 264);
+  --secondary: oklch(0.27 0.01 264);
+  --secondary-foreground: oklch(0.96 0.003 264);
+  --muted: oklch(0.27 0.01 264);
+  --muted-foreground: oklch(0.71 0.012 264);
+  --confidence-confirmed: oklch(0.75 0.15 155);
+  --confidence-likely: oklch(0.74 0.12 245);
+  --confidence-possible: oklch(0.78 0.13 70);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
@@ -126,5 +165,41 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* Headings are set tighter than the body. At display sizes the default
+     tracking reads loose, and this is an instrument, not a poster. */
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight text-balance;
+  }
+}
+
+@layer utilities {
+  .text-confirmed {
+    color: var(--confidence-confirmed);
+  }
+  .text-likely {
+    color: var(--confidence-likely);
+  }
+  .text-possible {
+    color: var(--confidence-possible);
+  }
+
+  /**
+   * The page backdrop for the landing and auth screens.
+   *
+   * Replaces the Aceternity spotlight, which paints light onto darkness and
+   * simply disappears on a white ground. A faint ruled grid fading out from
+   * the top does the same job here: it gives the empty space a texture and a
+   * centre without competing with the type.
+   */
+  .surface-grid {
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 3.5rem 3.5rem;
+    mask-image: radial-gradient(ellipse 80% 55% at 50% 0%, #000 20%, transparent 78%);
   }
 }

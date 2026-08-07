@@ -14,7 +14,7 @@
  * 127.0.0.1 are all not.
  */
 
-import { lookup } from 'node:dns/promises';
+import { lookup, resolveCname, resolveNs, resolveMx, resolveTxt } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 import { badRequest } from './errors.js';
@@ -130,6 +130,40 @@ function isPublicIPv6(address: string): boolean {
   if (mapped) return isPublicIPv4(mapped[1]!);
 
   return true;
+}
+
+/**
+ * DNS answers for a host, as `TYPE value` lines.
+ *
+ * Worth collecting because a site behind a proxy strips the headers that would
+ * otherwise name its host — but the CNAME still points at `cname.vercel-dns.com`
+ * and the NS records still say Cloudflare. TXT records give away verified SaaS
+ * (`google-site-verification`, `stripe-verification`), and MX names the mail
+ * provider.
+ *
+ * Every lookup is best-effort and independent: most hosts have no CNAME at the
+ * apex, and one NXDOMAIN must not lose the records that did resolve.
+ */
+export async function lookupDnsRecords(host: string): Promise<string[]> {
+  if (isIP(host) !== 0) return [];
+
+  const records: string[] = [];
+  const collect = async (type: string, fn: () => Promise<string[]>): Promise<void> => {
+    try {
+      for (const value of await fn()) records.push(`${type} ${value}`);
+    } catch {
+      // NODATA and NXDOMAIN are the normal case for most record types.
+    }
+  };
+
+  await Promise.all([
+    collect('CNAME', () => resolveCname(host)),
+    collect('NS', async () => resolveNs(host)),
+    collect('MX', async () => (await resolveMx(host)).map((r) => r.exchange)),
+    collect('TXT', async () => (await resolveTxt(host)).map((parts) => parts.join(''))),
+  ]);
+
+  return records;
 }
 
 /**

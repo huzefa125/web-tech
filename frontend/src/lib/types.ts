@@ -75,11 +75,18 @@ export type TechCategory =
   | 'ui'
   | 'animation'
   | 'library'
+  | 'build'
   | 'language'
   | 'server'
   | 'hosting'
   | 'cdn'
+  | 'database'
+  | 'auth'
+  | 'payment'
   | 'analytics'
+  | 'monitoring'
+  | 'maps'
+  | 'ai'
   | 'fonts'
   | 'other';
 

@@ -16,6 +16,13 @@ export interface DetectionInput {
   headers: Record<string, string>;
   /** Absolute URLs of every stylesheet and script the page loaded. */
   assetUrls: string[];
+  /**
+   * Every URL the page requested, of any kind. Distinct from `assetUrls`
+   * because the services a site talks to — an auth provider, a headless CMS, a
+   * model API — are reached over fetch, and so never appear among its
+   * stylesheets and scripts.
+   */
+  requestUrls: string[];
   /** Names of globals found on the page's window. */
   globals: string[];
   /** Names of cookies the site set — the most reliable backend signal left
@@ -26,6 +33,22 @@ export interface DetectionInput {
   /** Bodies of captured JS files, concatenated. May be empty. */
   js: string;
   finalUrl: string;
+
+  // ---- Optional extras. Older scans predate these, so every one is optional
+  // and a rule keyed on a missing input simply does not fire.
+
+  /** Body of the Web App Manifest, if the page declared one. */
+  manifest?: string | undefined;
+  /** Script URLs of any registered service workers. */
+  serviceWorkers?: string[] | undefined;
+  /** Body of /robots.txt, if it was fetched. */
+  robots?: string | undefined;
+  /**
+   * DNS answers for the host, as `TYPE value` lines — `CNAME x.vercel-dns.com`,
+   * `NS ns1.cloudflare.com`. Hosting and CDN often show here and nowhere else,
+   * because the origin sits behind a proxy that strips its own headers.
+   */
+  dns?: string[] | undefined;
 }
 
 export interface Detection {

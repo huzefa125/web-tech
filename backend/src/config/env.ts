@@ -66,11 +66,23 @@ const envSchema = z.object({
 
   // ---- Crawler (module 1) -------------------------------------------
   CRAWLER_NAV_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * How long to let a page keep loading after DOMContentLoaded before capturing
+   * it. Bounded rather than open-ended: waiting for true network idle means a
+   * site with analytics polling or a websocket never finishes at all.
+   */
+  CRAWLER_SETTLE_MS: z.coerce.number().int().positive().default(6_000),
   CRAWLER_ASSET_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   /** Per-scan cap on stored CSS/JS files. Some sites ship hundreds. */
   CRAWLER_MAX_ASSETS: z.coerce.number().int().positive().default(50),
   /** Per-asset byte cap; anything larger is recorded but not stored. */
   CRAWLER_MAX_ASSET_BYTES: z.coerce.number().int().positive().default(5_000_000),
+  /**
+   * Cap on distinct request URLs remembered per scan. Only the URLs are kept,
+   * not bodies, so this is cheap — but an infinite-scroll page firing XHR on a
+   * timer would otherwise grow the set without bound.
+   */
+  CRAWLER_MAX_REQUEST_URLS: z.coerce.number().int().positive().default(400),
   CRAWLER_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(1440),
   CRAWLER_VIEWPORT_HEIGHT: z.coerce.number().int().positive().default(900),
   CRAWLER_USER_AGENT: z

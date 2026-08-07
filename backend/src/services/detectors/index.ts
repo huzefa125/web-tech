@@ -7,25 +7,11 @@
  * that change under the test.
  */
 
-import * as cheerio from 'cheerio';
-
+import { derive, type DerivedDocument } from './derive.js';
 import { RULES, type Rule, type Signal } from './rules.js';
 import type { Detection, DetectionInput } from './types.js';
 
 export type { Detection, DetectionInput } from './types.js';
-
-/** Content of every `<meta name="generator">`, joined. */
-function generatorMeta(html: string): string {
-  try {
-    const $ = cheerio.load(html);
-    return $('meta[name="generator" i]')
-      .map((_, el) => $(el).attr('content') ?? '')
-      .get()
-      .join(' | ');
-  } catch {
-    return '';
-  }
-}
 
 interface SignalHit {
   confidence: number;
@@ -33,8 +19,22 @@ interface SignalHit {
   version?: string | undefined;
 }
 
+/**
+ * Everything a signal can be tested against, assembled once per scan.
+ *
+ * Building this up front matters: the document is parsed a single time instead
+ * of once per rule, and a rule keyed on inline scripts cannot accidentally
+ * match the same text sitting in a comment or an attribute elsewhere on the
+ * page.
+ */
+interface Context {
+  input: DetectionInput;
+  doc: DerivedDocument;
+}
+
 /** Test one signal. Returns the hit, or null. */
-function testSignal(signal: Signal, input: DetectionInput, generator: string): SignalHit | null {
+function testSignal(signal: Signal, ctx: Context): SignalHit | null {
+  const { input, doc } = ctx;
   const haystacks: string[] = [];
 
   switch (signal.in) {
@@ -48,24 +48,49 @@ function testSignal(signal: Signal, input: DetectionInput, generator: string): S
       haystacks.push(input.js);
       break;
     case 'metaGenerator':
-      haystacks.push(generator);
+      haystacks.push(doc.generator);
+      break;
+    case 'meta':
+      haystacks.push(doc.meta);
+      break;
+    case 'bodyClass':
+      haystacks.push(doc.bodyClass);
+      break;
+    case 'inlineScript':
+      haystacks.push(doc.inlineScript);
+      break;
+    case 'inlineStyle':
+      haystacks.push(doc.inlineStyle);
+      break;
+    case 'scriptSrc':
+      haystacks.push(...doc.scriptSrcs);
+      break;
+    case 'formAction':
+      haystacks.push(...doc.formActions);
+      break;
+    case 'iframe':
+      haystacks.push(...doc.iframeSrcs);
       break;
     case 'assetUrl':
       haystacks.push(...input.assetUrls);
       break;
+    case 'request':
+      haystacks.push(...input.requestUrls);
+      break;
     case 'url':
       haystacks.push(input.finalUrl);
       break;
-    case 'cookie':
-      // Cookie names are matched whole, like globals: a substring test would
-      // make `session` fire on `_ga_session_id` and half the backend rules
-      // with it. A regex is still allowed for families like `wordpress_*`.
-      if (typeof signal.match === 'string') {
-        return input.cookies.includes(signal.match)
-          ? { confidence: signal.confidence, evidence: signal.evidence }
-          : null;
-      }
-      haystacks.push(...input.cookies);
+    case 'manifest':
+      haystacks.push(input.manifest ?? '');
+      break;
+    case 'serviceWorker':
+      haystacks.push(...(input.serviceWorkers ?? []));
+      break;
+    case 'robots':
+      haystacks.push(input.robots ?? '');
+      break;
+    case 'dns':
+      haystacks.push(...(input.dns ?? []));
       break;
     case 'global':
       // Globals are exact names, never substrings: matching `$` as a substring
@@ -73,6 +98,16 @@ function testSignal(signal: Signal, input: DetectionInput, generator: string): S
       return input.globals.includes(String(signal.match))
         ? { confidence: signal.confidence, evidence: signal.evidence }
         : null;
+    case 'cookie':
+      // Cookie names are matched whole for the same reason. A regex is still
+      // allowed, for families like `wordpress_*`.
+      if (typeof signal.match === 'string') {
+        return input.cookies.includes(signal.match)
+          ? { confidence: signal.confidence, evidence: signal.evidence }
+          : null;
+      }
+      haystacks.push(...input.cookies);
+      break;
     case 'header': {
       const value = signal.header ? input.headers[signal.header] : undefined;
       if (value === undefined) return null;
@@ -104,9 +139,9 @@ function testSignal(signal: Signal, input: DetectionInput, generator: string): S
   return null;
 }
 
-function runRule(rule: Rule, input: DetectionInput, generator: string): Detection | null {
+function runRule(rule: Rule, ctx: Context): Detection | null {
   const hits = rule.signals
-    .map((s) => testSignal(s, input, generator))
+    .map((s) => testSignal(s, ctx))
     .filter((h): h is SignalHit => h !== null);
 
   if (hits.length === 0) return null;
@@ -121,7 +156,9 @@ function runRule(rule: Rule, input: DetectionInput, generator: string): Detectio
     // take the first hit that actually captured one.
     version: hits.find((h) => h.version)?.version,
     confidence: best.confidence,
-    evidence: hits.map((h) => h.evidence),
+    // Deduped: two signals can describe the same finding in the same words,
+    // and repeating a sentence in the UI reads as a bug.
+    evidence: [...new Set(hits.map((h) => h.evidence))],
   };
 }
 
@@ -133,11 +170,11 @@ function runRule(rule: Rule, input: DetectionInput, generator: string): Detectio
  * — a page can be unmistakably Next.js without ever mentioning React.
  */
 export function detect(input: DetectionInput): Detection[] {
-  const generator = generatorMeta(input.html);
+  const ctx: Context = { input, doc: derive(input.html) };
 
   const found = new Map<string, Detection>();
   for (const rule of RULES) {
-    const detection = runRule(rule, input, generator);
+    const detection = runRule(rule, ctx);
     if (detection) found.set(detection.name, detection);
   }
 

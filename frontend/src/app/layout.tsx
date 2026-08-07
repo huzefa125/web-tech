@@ -31,9 +31,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      // Dark by default: the dashboard is a data surface, and the Aceternity
-      // spotlight and beams are built for a dark canvas.
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // Light. Every detected technology renders its own brand mark in its own
+      // colour, and a dark chrome turns that into a scatter of glowing tiles;
+      // on white they read as a set.
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="bg-background text-foreground flex min-h-full flex-col">
